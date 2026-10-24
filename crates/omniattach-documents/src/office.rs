@@ -447,19 +447,6 @@ pub(crate) fn docx(doc: &mut Document, bytes: &[u8], options: &Options) -> Resul
     Ok(())
 }
 
-/// Shape position as (y, x) from the first a:off, so shapes read top to bottom, then left to right.
-fn shape_position(shape: Node<'_, '_>) -> (i64, i64) {
-    shape
-        .descendants()
-        .find(|n| is(*n, A, "off"))
-        .map(|off| {
-            let x = off.attribute("x").and_then(|v| v.parse().ok()).unwrap_or(0);
-            let y = off.attribute("y").and_then(|v| v.parse().ok()).unwrap_or(0);
-            (y, x)
-        })
-        .unwrap_or((0, 0))
-}
-
 pub(crate) fn pptx(doc: &mut Document, bytes: &[u8], options: &Options) -> Result<()> {
     let mut pkg = Package::open(bytes, options)?;
     let presentation = pkg.text("ppt/presentation.xml")?;
@@ -491,14 +478,14 @@ pub(crate) fn pptx(doc: &mut Document, bytes: &[u8], options: &Options) -> Resul
         for target in rel_targets(&mut pkg, &member, "/image", options)? {
             owners.entry(target).or_insert(slide);
         }
-        let mut shapes: Vec<Node<'_, '_>> = match xml.descendants().find(|n| is(*n, P, "spTree")) {
+        // Document order of spTree children is the slide's reading order (selection pane order).
+        let shapes: Vec<Node<'_, '_>> = match xml.descendants().find(|n| is(*n, P, "spTree")) {
             Some(tree) => tree
                 .children()
                 .filter(|n| is(*n, P, "sp") || is(*n, P, "graphicFrame") || is(*n, P, "grpSp"))
                 .collect(),
             None => vec![xml.root_element()],
         };
-        shapes.sort_by_key(|n| shape_position(*n));
         for shape in shapes {
             for tbl in shape.descendants().filter(|n| is(*n, A, "tbl")) {
                 let mut rows = Vec::new();
@@ -572,7 +559,7 @@ pub(crate) fn pptx(doc: &mut Document, bytes: &[u8], options: &Options) -> Resul
         let owner = owners.get(&name).copied();
         attach(doc, &mut pkg, &name, owner, options)?;
     }
-    doc.warn("PPTX_TEXT_ONLY", "Slides read in shape-position order (top to bottom, then left to right), not true reading order: shape text, tables, speaker notes and embedded raster images only; charts, SmartArt and previews are not extracted");
+    doc.warn("PPTX_TEXT_ONLY", "Slides read in shape order (p:spTree document order, the order PowerPoint uses for its selection pane and accessibility reading order); shape text, tables, speaker notes and embedded raster images only; charts, SmartArt and previews are not extracted");
     Ok(())
 }
 pub(crate) fn odf(doc: &mut Document, bytes: &[u8], slides: bool, options: &Options) -> Result<()> {
