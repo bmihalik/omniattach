@@ -691,17 +691,32 @@ pub(crate) fn odf(doc: &mut Document, bytes: &[u8], slides: bool, options: &Opti
                 let parent: Option<String> = list_stack.last().map(|(_, _, id)| id.clone());
                 doc.paragraph(BlockKind::ListItem { ordered: false }, value, span);
                 if !continuation {
-                    if let Some(block) = doc.blocks.last_mut()
-                        && let Some(parent) = parent
-                    {
-                        block.parent_id = Some(parent);
-                    }
+                    let heading = doc
+                        .blocks
+                        .iter()
+                        .rev()
+                        .skip(1)
+                        .find(|b| matches!(b.kind, BlockKind::Heading { .. }))
+                        .map(|b| b.id.clone());
                     let id = doc.blocks.last().map(|b| b.id.clone()).unwrap_or_default();
+                    if let Some(block) = doc.blocks.last_mut() {
+                        block.parent_id = parent.or(heading);
+                    }
                     list_stack.push((depth, item, id));
                 }
             } else {
                 list_stack.clear();
                 doc.paragraph(BlockKind::Paragraph, value, span);
+                let heading = doc
+                    .blocks
+                    .iter()
+                    .rev()
+                    .skip(1)
+                    .find(|b| matches!(b.kind, BlockKind::Heading { .. }))
+                    .map(|b| b.id.clone());
+                if let Some(block) = doc.blocks.last_mut() {
+                    block.parent_id = heading;
+                }
             }
         }
         if doc.blocks.len() > options.limits.blocks {
