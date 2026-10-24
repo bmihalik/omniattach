@@ -33,10 +33,12 @@ fn pdf_with_outline() -> Vec<u8> {
 
 #[test]
 fn pdf_pages_without_text_use_ocr_when_supplied() {
-    let mut options = Options::default();
-    options.pdf_ocr = Some(PdfOcr(Arc::new(|page: u32| -> Result<String> {
-        Ok(format!("Scanned page {page}"))
-    })));
+    let options = Options {
+        pdf_ocr: Some(PdfOcr(Arc::new(|page: u32| -> Result<String> {
+            Ok(format!("Scanned page {page}"))
+        }))),
+        ..Default::default()
+    };
     let doc = extract_bytes("a.pdf", &pdf_with_outline(), &options).unwrap();
     let last = doc.blocks.last().unwrap();
     assert_eq!(last.text, "Scanned page 1");

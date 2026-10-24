@@ -1,6 +1,6 @@
 //! Document routes backed by omniattach-documents. Compiled only with the `documents` feature.
 use crate::*;
-use omniattach_documents::{Format as DocFormat, Options};
+use omniattach_documents::{Format as DocFormat, Limits, Options};
 
 struct DocumentConverter;
 
@@ -66,28 +66,38 @@ impl Converter for DocumentConverter {
                 "ocr option applies only to PDF documents".into(),
             ));
         }
-        let mut options = Options::default();
-        options.limits.input_bytes =
-            usize::try_from(context.policy().max_input_bytes).unwrap_or(usize::MAX);
-        if ocr {
-            #[cfg(feature = "backends")]
-            {
-                let path = input.path.clone();
-                options.pdf_ocr = Some(omniattach_documents::PdfOcr(std::sync::Arc::new(
-                    move |page: u32| -> omniattach_documents::Result<String> {
-                        let runner = omniattach_backends::ProcessRunner;
-                        let ctx = omniattach_backends::BackendContext::new(&runner);
-                        omniattach_backends::PdfPageOcr::default()
-                            .recognize_page(&path, page, &ctx)
-                            .map_err(|e| omniattach_documents::Error::Parse(format!("OCR: {e}")))
-                    },
-                )));
-            }
-            #[cfg(not(feature = "backends"))]
+        #[cfg(feature = "backends")]
+        let pdf_ocr = if ocr {
+            let path = input.path.clone();
+            Some(omniattach_documents::PdfOcr(std::sync::Arc::new(
+                move |page: u32| -> omniattach_documents::Result<String> {
+                    let runner = omniattach_backends::ProcessRunner;
+                    let ctx = omniattach_backends::BackendContext::new(&runner);
+                    omniattach_backends::PdfPageOcr::default()
+                        .recognize_page(&path, page, &ctx)
+                        .map_err(|e| omniattach_documents::Error::Parse(format!("OCR: {e}")))
+                },
+            )))
+        } else {
+            None
+        };
+        #[cfg(not(feature = "backends"))]
+        let pdf_ocr = if ocr {
             return Err(Error::Configuration(
                 "ocr option requires the backends feature".into(),
             ));
-        }
+        } else {
+            None
+        };
+        let options = Options {
+            limits: Limits {
+                input_bytes: usize::try_from(context.policy().max_input_bytes)
+                    .unwrap_or(usize::MAX),
+                ..Default::default()
+            },
+            pdf_ocr,
+            ..Default::default()
+        };
         let bytes = std::fs::read(&input.path)?;
         context.check()?;
         let document =
