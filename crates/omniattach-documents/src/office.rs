@@ -136,8 +136,13 @@ fn attach(
     Ok(())
 }
 
-/// Image relationships declared by a part (for example ppt/slides/_rels/slide1.xml.rels).
-fn image_targets(pkg: &mut Package<'_>, member: &str, options: &Options) -> Result<Vec<String>> {
+/// Internal targets of relationships whose Type ends with `suffix`, resolved against `member`.
+fn rel_targets(
+    pkg: &mut Package<'_>,
+    member: &str,
+    suffix: &str,
+    options: &Options,
+) -> Result<Vec<String>> {
     let (dir, file) = member.rsplit_once('/').unwrap_or(("", member));
     let rels = format!("{dir}/_rels/{file}.rels");
     if !pkg.contains(&rels) {
@@ -147,8 +152,8 @@ fn image_targets(pkg: &mut Package<'_>, member: &str, options: &Options) -> Resu
     let tree = xml::parse(&text, options)?;
     let mut out = Vec::new();
     for rel in tree.descendants().filter(|n| is(*n, REL, "Relationship")) {
-        let is_image = rel.attribute("Type").is_some_and(|t| t.ends_with("/image"));
-        if is_image
+        let matches = rel.attribute("Type").is_some_and(|t| t.ends_with(suffix));
+        if matches
             && rel.attribute("TargetMode") != Some("External")
             && let Some(target) = rel.attribute("Target")
         {
@@ -234,6 +239,20 @@ pub(crate) fn docx(doc: &mut Document, bytes: &[u8], options: &Options) -> Resul
     doc.warn("DOCX_BASIC", "Main body text/tables and embedded raster images only: inherited styles, numbering, revisions, headers/footers, merges and layout are not reconstructed");
     Ok(())
 }
+
+/// Shape position as (y, x) from the first a:off, so shapes read top to bottom, then left to right.
+fn shape_position(shape: Node<'_, '_>) -> (i64, i64) {
+    shape
+        .descendants()
+        .find(|n| is(*n, A, "off"))
+        .map(|off| {
+            let x = off.attribute("x").and_then(|v| v.parse().ok()).unwrap_or(0);
+            let y = off.attribute("y").and_then(|v| v.parse().ok()).unwrap_or(0);
+            (y, x)
+        })
+        .unwrap_or((0, 0))
+}
+
 pub(crate) fn pptx(doc: &mut Document, bytes: &[u8], options: &Options) -> Result<()> {
     let mut pkg = Package::open(bytes, options)?;
     let presentation = pkg.text("ppt/presentation.xml")?;
@@ -241,6 +260,7 @@ pub(crate) fn pptx(doc: &mut Document, bytes: &[u8], options: &Options) -> Resul
     let tree = xml::parse(&presentation, options)?;
     let rels = xml::parse(&relationships, options)?;
     let mut slide = 0u32;
+    let mut cells = 0usize;
     let mut owners: BTreeMap<String, u32> = BTreeMap::new();
     for item in tree.descendants().filter(|n| is(*n, P, "sldId")) {
         let id = item
@@ -261,19 +281,85 @@ pub(crate) fn pptx(doc: &mut Document, bytes: &[u8], options: &Options) -> Resul
         let input = pkg.text(&member)?;
         let xml = xml::parse(&input, options)?;
         slide += 1;
-        for target in image_targets(&mut pkg, &member, options)? {
+        for target in rel_targets(&mut pkg, &member, "/image", options)? {
             owners.entry(target).or_insert(slide);
         }
-        for node in xml.descendants().filter(|n| is(*n, A, "p")) {
-            let value = run_text(node, A);
-            if value.trim().is_empty() {
-                continue;
+        let mut shapes: Vec<Node<'_, '_>> = xml
+            .descendants()
+            .find(|n| is(*n, P, "spTree"))
+            .map(|tree| {
+                tree.children()
+                    .filter(|n| is(*n, P, "sp") || is(*n, P, "graphicFrame") || is(*n, P, "grpSp"))
+                    .collect()
+            })
+            .unwrap_or_default();
+        shapes.sort_by_key(|n| shape_position(*n));
+        for shape in shapes {
+            for tbl in shape.descendants().filter(|n| is(*n, A, "tbl")) {
+                let mut rows = Vec::new();
+                for (ri, row) in tbl.children().filter(|n| is(*n, A, "tr")).enumerate() {
+                    let mut values = Vec::new();
+                    for (ci, cell) in row.children().filter(|n| is(*n, A, "tc")).enumerate() {
+                        cells += 1;
+                        if cells > options.limits.cells {
+                            return Err(Error::LimitExceeded("PPTX cells".into()));
+                        }
+                        let mut value = Cell::text(
+                            cell.descendants()
+                                .filter(|n| is(*n, A, "p"))
+                                .map(|n| run_text(n, A))
+                                .collect::<Vec<_>>()
+                                .join("\n"),
+                        );
+                        value.source = xml::span(cell, Some(&member));
+                        value.source.slide = Some(slide);
+                        value.source.row = Some(ri as u32 + 1);
+                        value.source.column = Some(ci as u32 + 1);
+                        values.push(value);
+                    }
+                    rows.push(values);
+                }
+                let mut source = xml::span(tbl, Some(&member));
+                source.slide = Some(slide);
+                doc.add_table(new_table(None, source, rows, options)?);
             }
-            let mut span = xml::span(node, Some(&member));
-            span.slide = Some(slide);
-            doc.paragraph(BlockKind::Paragraph, value, span);
-            if doc.blocks.len() > options.limits.blocks {
-                return Err(Error::LimitExceeded("PPTX blocks".into()));
+            for node in shape
+                .descendants()
+                .filter(|n| is(*n, A, "p") && !ancestor(*n, A, "tbl"))
+            {
+                let value = run_text(node, A);
+                if value.trim().is_empty() {
+                    continue;
+                }
+                let mut span = xml::span(node, Some(&member));
+                span.slide = Some(slide);
+                doc.paragraph(BlockKind::Paragraph, value, span);
+                if doc.blocks.len() > options.limits.blocks {
+                    return Err(Error::LimitExceeded("PPTX blocks".into()));
+                }
+            }
+        }
+        for notes in rel_targets(&mut pkg, &member, "/notesSlide", options)? {
+            let input = pkg.text(&notes)?;
+            let tree = xml::parse(&input, options)?;
+            for body in tree.descendants().filter(|n| {
+                is(*n, P, "sp")
+                    && n.descendants()
+                        .any(|d| is(d, P, "ph") && d.attribute("type") == Some("body"))
+            }) {
+                for node in body.descendants().filter(|n| is(*n, A, "p")) {
+                    let value = run_text(node, A);
+                    if value.trim().is_empty() {
+                        continue;
+                    }
+                    let mut span = xml::span(node, Some(&notes));
+                    span.slide = Some(slide);
+                    span.path = Some("notes".into());
+                    doc.paragraph(BlockKind::Paragraph, value, span);
+                    if doc.blocks.len() > options.limits.blocks {
+                        return Err(Error::LimitExceeded("PPTX blocks".into()));
+                    }
+                }
             }
         }
     }
@@ -281,7 +367,7 @@ pub(crate) fn pptx(doc: &mut Document, bytes: &[u8], options: &Options) -> Resul
         let owner = owners.get(&name).copied();
         attach(doc, &mut pkg, &name, owner, options)?;
     }
-    doc.warn("PPTX_TEXT_ONLY", "Slide order follows presentation relationships; shape text and embedded raster images only, not spatial reading order, notes, charts or previews");
+    doc.warn("PPTX_TEXT_ONLY", "Slides read in shape-position order (top to bottom, then left to right), not true reading order: shape text, tables, speaker notes and embedded raster images only; charts, SmartArt and previews are not extracted");
     Ok(())
 }
 pub(crate) fn odf(doc: &mut Document, bytes: &[u8], slides: bool, options: &Options) -> Result<()> {
