@@ -35,3 +35,22 @@ fn pptx_shapes_read_in_slide_order_not_position() {
     assert_eq!(doc.blocks[1].text, "Upper");
     assert_eq!(doc.blocks[0].source.slide, Some(1));
 }
+
+#[test]
+fn pptx_group_shapes_keep_xml_order() {
+    let presentation = format!(
+        r#"<p:presentation xmlns:p="{PRES_NS}" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><p:sldIdLst><p:sldId id="1" r:id="rA"/></p:sldIdLst></p:presentation>"#
+    );
+    let rels = r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rA" Target="slides/slide1.xml"/></Relationships>"#;
+    let slide = format!(
+        r#"<p:sld xmlns:p="{PRES_NS}" xmlns:a="{DRAW_NS}"><p:cSld><p:spTree><p:grpSp><p:nvGrpSpPr/><p:grpSpPr/><p:sp><p:txBody><a:p><a:r><a:t>Inner first</a:t></a:r></a:p></p:txBody></p:sp><p:sp><p:txBody><a:p><a:r><a:t>Inner second</a:t></a:r></a:p></p:txBody></p:sp></p:grpSp><p:sp><p:txBody><a:p><a:r><a:t>After group</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld></p:sld>"#
+    );
+    let bytes = package(&[
+        ("ppt/presentation.xml", &presentation),
+        ("ppt/_rels/presentation.xml.rels", rels),
+        ("ppt/slides/slide1.xml", &slide),
+    ]);
+    let doc = extract_bytes("a.pptx", &bytes, &Options::default()).unwrap();
+    let texts: Vec<&str> = doc.blocks.iter().map(|b| b.text.as_str()).collect();
+    assert_eq!(texts, vec!["Inner first", "Inner second", "After group"]);
+}

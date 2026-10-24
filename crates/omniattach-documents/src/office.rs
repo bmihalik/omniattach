@@ -688,7 +688,7 @@ pub(crate) fn pptx(doc: &mut Document, bytes: &[u8], options: &Options) -> Resul
         let owner = owners.get(&name).copied();
         attach(doc, &mut pkg, &name, owner, options)?;
     }
-    doc.warn("PPTX_TEXT_ONLY", "Slides read in shape order (p:spTree document order, the order PowerPoint uses for its selection pane and accessibility reading order); shape text, tables, speaker notes and embedded raster images only; charts, SmartArt and previews are not extracted");
+    doc.warn("PPTX_TEXT_ONLY", "Slides read in p:spTree order, with grouped shapes read in their own XML order (the order PowerPoint uses for its selection pane and accessibility reading order); shape text, tables, speaker notes and embedded raster images only; charts, SmartArt and previews are not extracted");
     Ok(())
 }
 pub(crate) fn odf(doc: &mut Document, bytes: &[u8], slides: bool, options: &Options) -> Result<()> {
