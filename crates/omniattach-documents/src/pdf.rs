@@ -33,14 +33,27 @@ pub(crate) fn extract(doc: &mut Document, bytes: &[u8], options: &Options) -> Re
         let text = pdf
             .extract_text_with_limit(&[*page], options.limits.archive_bytes as usize)
             .map_err(|e| Error::Parse(format!("PDF page {page}: {e}")))?;
-        if text.trim().is_empty() {
+        if !text.trim().is_empty() {
+            doc.paragraph(BlockKind::Paragraph, text.trim_end().into(), span);
+        } else if let Some(ocr) = &options.pdf_ocr {
+            let recognized = (ocr.0)(*page)?;
+            if recognized.trim().is_empty() {
+                doc.diagnostics.push(Diagnostic {
+                    code: "PAGE_WITHOUT_TEXT".into(),
+                    message: format!("Page {page} has no text after OCR"),
+                    source: Some(span),
+                });
+            } else {
+                let mut span = span;
+                span.path = Some("ocr".into());
+                doc.paragraph(BlockKind::Paragraph, recognized.trim_end().into(), span);
+            }
+        } else {
             doc.diagnostics.push(Diagnostic {
                 code: "PAGE_WITHOUT_TEXT".into(),
                 message: format!("Page {page} contains no extractable text; OCR is not included"),
                 source: Some(span),
             });
-        } else {
-            doc.paragraph(BlockKind::Paragraph, text.trim_end().into(), span);
         }
     }
     let mut seen = BTreeSet::new();
@@ -58,7 +71,7 @@ pub(crate) fn extract(doc: &mut Document, bytes: &[u8], options: &Options) -> Re
             }
         }
     }
-    doc.warn("PDF_TEXT_ONLY", "PDF text/content-stream order only; bookmarks become headings; no OCR, layout reconstruction, tables or equations. Embedded JPEG and JPEG 2000 images are extracted as assets; other image encodings are reported as skipped");
+    doc.warn("PDF_TEXT_ONLY", "PDF text/content-stream order only; bookmarks become headings; pages without text are OCR'd only when a PdfOcr callback is supplied; no layout reconstruction, tables or equations. Embedded JPEG and JPEG 2000 images are extracted as assets; other image encodings are reported as skipped");
     Ok(())
 }
 

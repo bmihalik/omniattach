@@ -25,7 +25,7 @@ pub mod xml;
 
 pub use error::{Error, Result};
 pub use model::*;
-pub use options::{Limits, Options};
+pub use options::{Limits, Options, PdfOcr, PdfOcrFn};
 pub use render::CsvOptions;
 use sha2::{Digest, Sha256};
 use std::{fs::File, io::Read, path::Path};

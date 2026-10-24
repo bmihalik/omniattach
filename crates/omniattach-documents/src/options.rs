@@ -1,4 +1,5 @@
 use crate::xml::XmlTableSpec;
+use std::sync::Arc;
 
 #[derive(Debug, Clone)]
 pub struct Limits {
@@ -21,6 +22,20 @@ impl Default for Limits {
         }
     }
 }
+
+/// Recognizes text on one image-only PDF page. Receives the one-based page number and returns plain text; empty text means nothing was recognized.
+pub type PdfOcrFn = dyn Fn(u32) -> crate::Result<String> + Send + Sync;
+
+/// Per-page OCR callback for PDF pages that have no extractable text.
+#[derive(Clone)]
+pub struct PdfOcr(pub Arc<PdfOcrFn>);
+
+impl std::fmt::Debug for PdfOcr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("PdfOcr(..)")
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Options {
     pub limits: Limits,
@@ -29,6 +44,8 @@ pub struct Options {
     pub csv_has_headers: bool,
     pub csv_delimiter: Option<u8>,
     pub xml_table: Option<XmlTableSpec>,
+    /// OCR for PDF pages without extractable text. None means such pages are only reported.
+    pub pdf_ocr: Option<PdfOcr>,
 }
 impl Default for Options {
     fn default() -> Self {
@@ -38,6 +55,7 @@ impl Default for Options {
             csv_has_headers: true,
             csv_delimiter: None,
             xml_table: None,
+            pdf_ocr: None,
         }
     }
 }
