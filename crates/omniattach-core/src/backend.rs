@@ -99,6 +99,7 @@ pub trait Backend: Send + Sync {
         Availability::Ready { version_info: None }
     }
 
+    #[allow(clippy::result_large_err)]
     fn execute(
         &self,
         job: &ConversionJob,

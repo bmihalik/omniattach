@@ -38,6 +38,7 @@ impl BackendRegistry {
             .collect()
     }
 
+    #[allow(clippy::result_large_err)]
     pub fn resolve_chain(
         &self,
         mime: &str,
