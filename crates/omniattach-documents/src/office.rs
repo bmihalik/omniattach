@@ -221,17 +221,68 @@ fn style_heading_level(styles: &BTreeMap<String, StyleInfo>, id: &str) -> Option
         };
         if let Some(rest) = style.name.strip_prefix("heading ")
             && let Ok(level) = rest.trim().parse::<u8>()
-            {
-                return Some(level);
-            }
-            if let Some(level) = style.outline {
-                return Some(level);
-            }
-            current = style.based_on.clone();
+        {
+            return Some(level);
+        }
+        if let Some(level) = style.outline {
+            return Some(level);
+        }
+        current = style.based_on.clone();
     }
     id.to_ascii_lowercase()
-    .strip_prefix("heading")
-    .and_then(|s| s.parse::<u8>().ok())
+        .strip_prefix("heading")
+        .and_then(|s| s.parse::<u8>().ok())
+}
+
+/// numId -> (ilvl -> ordered). A level is ordered unless its numFmt is bullet or none.
+fn docx_numbering(
+    pkg: &mut Package<'_>,
+    options: &Options,
+) -> Result<BTreeMap<String, BTreeMap<u8, bool>>> {
+    let mut out = BTreeMap::new();
+    if !pkg.contains("word/numbering.xml") {
+        return Ok(out);
+    }
+    let text = pkg.text("word/numbering.xml")?;
+    let tree = xml::parse(&text, options)?;
+    let mut abstracts: BTreeMap<String, BTreeMap<u8, bool>> = BTreeMap::new();
+    for an in tree.descendants().filter(|n| is(*n, W, "abstractNum")) {
+        let Some(id) = an.attribute((W, "abstractNumId")) else {
+            continue;
+        };
+        let mut levels = BTreeMap::new();
+        for lvl in an.children().filter(|n| is(*n, W, "lvl")) {
+            let Some(ilvl) = lvl
+                .attribute((W, "ilvl"))
+                .and_then(|v| v.parse::<u8>().ok())
+            else {
+                continue;
+            };
+            let fmt = lvl
+                .children()
+                .find(|n| is(*n, W, "numFmt"))
+                .and_then(|n| n.attribute((W, "val")))
+                .unwrap_or("bullet");
+            levels.insert(ilvl, !matches!(fmt, "bullet" | "none"));
+        }
+        abstracts.insert(id.to_owned(), levels);
+    }
+    for num in tree.descendants().filter(|n| is(*n, W, "num")) {
+        let Some(id) = num.attribute((W, "numId")) else {
+            continue;
+        };
+        let Some(abs) = num
+            .children()
+            .find(|n| is(*n, W, "abstractNumId"))
+            .and_then(|n| n.attribute((W, "val")))
+        else {
+            continue;
+        };
+        if let Some(levels) = abstracts.get(abs) {
+            out.insert(id.to_owned(), levels.clone());
+        }
+    }
+    Ok(out)
 }
 
 /// Footnotes, headers and footers, appended after the body in source-part order.
@@ -302,6 +353,7 @@ fn docx_note_part(
 pub(crate) fn docx(doc: &mut Document, bytes: &[u8], options: &Options) -> Result<()> {
     let mut pkg = Package::open(bytes, options)?;
     let styles = docx_styles(&mut pkg, options)?;
+    let numbering = docx_numbering(&mut pkg, options)?;
     let input = pkg.text("word/document.xml")?;
     let tree = xml::parse(&input, options)?;
     let mut cells = 0usize;
@@ -358,15 +410,26 @@ pub(crate) fn docx(doc: &mut Document, bytes: &[u8], options: &Options) -> Resul
         let span = xml::span(node, Some("word/document.xml"));
         if let Some(level) = level {
             doc.heading(level.clamp(1, 6), value, span);
-        } else if node.descendants().any(|n| is(n, W, "numPr")) {
-            let ilvl = node
-                .descendants()
+        } else if let Some(num_pr) = node.descendants().find(|n| is(*n, W, "numPr")) {
+            let ilvl_text = num_pr
+                .children()
                 .find(|n| is(*n, W, "ilvl"))
                 .and_then(|n| n.attribute((W, "val")))
                 .unwrap_or("0");
+            let num_id = num_pr
+                .children()
+                .find(|n| is(*n, W, "numId"))
+                .and_then(|n| n.attribute((W, "val")))
+                .unwrap_or("");
+            let ilvl = ilvl_text.parse::<u8>().unwrap_or(0);
+            let ordered = numbering
+                .get(num_id)
+                .and_then(|levels| levels.get(&ilvl))
+                .copied()
+                .unwrap_or(false);
             let mut span = span;
             span.path = Some(format!("list-level:{ilvl}"));
-            doc.paragraph(BlockKind::ListItem { ordered: false }, value, span);
+            doc.paragraph(BlockKind::ListItem { ordered }, value, span);
         } else {
             doc.paragraph(BlockKind::Paragraph, value, span);
         }
@@ -380,7 +443,7 @@ pub(crate) fn docx(doc: &mut Document, bytes: &[u8], options: &Options) -> Resul
     for name in media_members(&pkg, "word/media/") {
         attach(doc, &mut pkg, &name, None, options)?;
     }
-    doc.warn("DOCX_BASIC", "Body text, tables, headings from styles and outline levels, list items (unordered; numbering formats not read), footnotes, headers, footers and embedded raster images only; revisions, text boxes and page layout are not reconstructed");
+    doc.warn("DOCX_BASIC", "Body text, tables, headings from styles and outline levels, list items (ordered or bullet from numbering.xml; list level in source path), footnotes, headers, footers and embedded raster images only; revisions, text boxes and page layout are not reconstructed");
     Ok(())
 }
 

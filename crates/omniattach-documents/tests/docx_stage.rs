@@ -83,3 +83,20 @@ fn docx_footnotes_headers_and_footers_follow_body() {
     assert!(rest.contains(&("Header text", Some("header"))));
     assert!(rest.contains(&("Footer text", Some("footer"))));
 }
+
+#[test]
+fn docx_numbered_paragraphs_use_numbering_format() {
+    let numbering = format!(
+        r#"<w:numbering xmlns:w="{DOC_NS}"><w:abstractNum w:abstractNumId="0"><w:lvl w:ilvl="0"><w:numFmt w:val="decimal"/></w:lvl><w:lvl w:ilvl="1"><w:numFmt w:val="bullet"/></w:lvl></w:abstractNum><w:num w:numId="7"><w:abstractNumId w:val="0"/></w:num></w:numbering>"#
+    );
+    let body = document(
+        r#"<w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="7"/></w:numPr></w:pPr><w:r><w:t>First</w:t></w:r></w:p><w:p><w:pPr><w:numPr><w:ilvl w:val="1"/><w:numId w:val="7"/></w:numPr></w:pPr><w:r><w:t>Sub</w:t></w:r></w:p>"#,
+    );
+    let doc = read(
+        "a.docx",
+        &[("word/document.xml", &body), ("word/numbering.xml", &numbering)],
+    );
+    assert!(matches!(doc.blocks[0].kind, BlockKind::ListItem { ordered: true }));
+    assert!(matches!(doc.blocks[1].kind, BlockKind::ListItem { ordered: false }));
+    assert_eq!(doc.blocks[1].source.path.as_deref(), Some("list-level:1"));
+}
