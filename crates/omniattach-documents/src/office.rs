@@ -234,18 +234,26 @@ fn style_heading_level(styles: &BTreeMap<String, StyleInfo>, id: &str) -> Option
         .and_then(|s| s.parse::<u8>().ok())
 }
 
-/// numId -> (ilvl -> ordered). A level is ordered unless its numFmt is bullet or none.
+/// One list level from word/numbering.xml.
+#[derive(Clone)]
+struct NumLevel {
+    format: String,
+    start: u32,
+    text: String,
+}
+
+/// numId -> (ilvl -> level definition).
 fn docx_numbering(
     pkg: &mut Package<'_>,
     options: &Options,
-) -> Result<BTreeMap<String, BTreeMap<u8, bool>>> {
+) -> Result<BTreeMap<String, BTreeMap<u8, NumLevel>>> {
     let mut out = BTreeMap::new();
     if !pkg.contains("word/numbering.xml") {
         return Ok(out);
     }
     let text = pkg.text("word/numbering.xml")?;
     let tree = xml::parse(&text, options)?;
-    let mut abstracts: BTreeMap<String, BTreeMap<u8, bool>> = BTreeMap::new();
+    let mut abstracts: BTreeMap<String, BTreeMap<u8, NumLevel>> = BTreeMap::new();
     for an in tree.descendants().filter(|n| is(*n, W, "abstractNum")) {
         let Some(id) = an.attribute((W, "abstractNumId")) else {
             continue;
@@ -258,12 +266,24 @@ fn docx_numbering(
             else {
                 continue;
             };
-            let fmt = lvl
-                .children()
-                .find(|n| is(*n, W, "numFmt"))
-                .and_then(|n| n.attribute((W, "val")))
-                .unwrap_or("bullet");
-            levels.insert(ilvl, !matches!(fmt, "bullet" | "none"));
+            let child_val = |name: &str| {
+                lvl.children()
+                    .find(|n| is(*n, W, name))
+                    .and_then(|n| n.attribute((W, "val")))
+            };
+            let format = child_val("numFmt").unwrap_or("decimal").to_owned();
+            let start = child_val("start")
+                .and_then(|v| v.parse::<u32>().ok())
+                .unwrap_or(1);
+            let text = child_val("lvlText").unwrap_or("").to_owned();
+            levels.insert(
+                ilvl,
+                NumLevel {
+                    format,
+                    start,
+                    text,
+                },
+            );
         }
         abstracts.insert(id.to_owned(), levels);
     }
@@ -283,6 +303,93 @@ fn docx_numbering(
         }
     }
     Ok(out)
+}
+
+/// Formats a counter in the given numFmt. Unknown formats fall back to decimal.
+fn format_number(n: u32, fmt: &str) -> String {
+    match fmt {
+        "lowerLetter" | "upperLetter" => {
+            let mut s = String::new();
+            let mut x = n;
+            while x > 0 {
+                x -= 1;
+                s.insert(0, char::from(b'a' + (x % 26) as u8));
+                x /= 26;
+            }
+            if fmt == "upperLetter" {
+                s.to_ascii_uppercase()
+            } else {
+                s
+            }
+        }
+        "lowerRoman" | "upperRoman" => {
+            const SYMBOLS: [(u32, &str); 13] = [
+                (1000, "m"),
+                (900, "cm"),
+                (500, "d"),
+                (400, "cd"),
+                (100, "c"),
+                (90, "xc"),
+                (50, "l"),
+                (40, "xl"),
+                (10, "x"),
+                (9, "ix"),
+                (5, "v"),
+                (4, "iv"),
+                (1, "i"),
+            ];
+            let mut s = String::new();
+            let mut rest = n;
+            for (value, symbol) in SYMBOLS {
+                while rest >= value {
+                    s.push_str(symbol);
+                    rest -= value;
+                }
+            }
+            if fmt == "upperRoman" {
+                s.to_ascii_uppercase()
+            } else {
+                s
+            }
+        }
+        _ => n.to_string(),
+    }
+}
+
+/// Renders a level's lvlText. %1..%9 are replaced by the current counter of that level.
+fn render_marker(
+    counters: &BTreeMap<(String, u8), u32>,
+    num_id: &str,
+    levels: &BTreeMap<u8, NumLevel>,
+    ilvl: u8,
+) -> String {
+    let Some(def) = levels.get(&ilvl) else {
+        return String::new();
+    };
+    let mut out = String::new();
+    let mut rest = def.text.as_str();
+    while let Some(pos) = rest.find('%') {
+        out.push_str(&rest[..pos]);
+        let after = &rest[pos + 1..];
+        match after.chars().next().and_then(|c| c.to_digit(10)) {
+            Some(d) if (1..=9).contains(&d) => {
+                let level = (d - 1) as u8;
+                let fmt = levels.get(&level).map_or("decimal", |l| l.format.as_str());
+                let value = counters
+                    .get(&(num_id.to_owned(), level))
+                    .copied()
+                    .unwrap_or(1);
+                out.push_str(&format_number(value, fmt));
+                rest = &after[1..];
+            }
+            _ => {
+                out.push('%');
+                rest = after;
+            }
+        }
+    }
+    out.push_str(rest);
+    out
 }
 
 /// Footnotes, headers and footers, appended after the body in source-part order.
@@ -357,6 +464,8 @@ pub(crate) fn docx(doc: &mut Document, bytes: &[u8], options: &Options) -> Resul
     let input = pkg.text("word/document.xml")?;
     let tree = xml::parse(&input, options)?;
     let mut cells = 0usize;
+    // Current counter per (numId, level), advanced in document order.
+    let mut counters: BTreeMap<(String, u8), u32> = BTreeMap::new();
     for node in tree.descendants().filter(|n| n.is_element()) {
         if is(node, W, "tbl") && !ancestor(node, W, "tbl") {
             let mut rows = Vec::new();
@@ -422,13 +531,28 @@ pub(crate) fn docx(doc: &mut Document, bytes: &[u8], options: &Options) -> Resul
                 .and_then(|n| n.attribute((W, "val")))
                 .unwrap_or("");
             let ilvl = ilvl_text.parse::<u8>().unwrap_or(0);
-            let ordered = numbering
-                .get(num_id)
-                .and_then(|levels| levels.get(&ilvl))
-                .copied()
-                .unwrap_or(false);
+            let empty: BTreeMap<u8, NumLevel> = BTreeMap::new();
+            let levels = numbering.get(num_id).unwrap_or(&empty);
+            let ordered = levels
+                .get(&ilvl)
+                .is_some_and(|d| !matches!(d.format.as_str(), "bullet" | "none"));
+            let mut marker = String::new();
+            if let Some(def) = levels.get(&ilvl) {
+                let c = counters
+                    .entry((num_id.to_owned(), ilvl))
+                    .or_insert(def.start.saturating_sub(1));
+                *c += 1;
+                counters.retain(|(n, l), _| !(n.as_str() == num_id && *l > ilvl));
+                if ordered {
+                    marker = render_marker(&counters, num_id, levels, ilvl);
+                }
+            }
             let mut span = span;
-            span.path = Some(format!("list-level:{ilvl}"));
+            span.path = Some(if marker.is_empty() {
+                format!("list-level:{ilvl}")
+            } else {
+                format!("list-level:{ilvl};marker:{marker}")
+            });
             doc.paragraph(BlockKind::ListItem { ordered }, value, span);
         } else {
             doc.paragraph(BlockKind::Paragraph, value, span);
@@ -443,7 +567,7 @@ pub(crate) fn docx(doc: &mut Document, bytes: &[u8], options: &Options) -> Resul
     for name in media_members(&pkg, "word/media/") {
         attach(doc, &mut pkg, &name, None, options)?;
     }
-    doc.warn("DOCX_BASIC", "Body text, tables, headings from styles and outline levels, list items (ordered or bullet from numbering.xml; list level in source path), footnotes, headers, footers and embedded raster images only; revisions, text boxes and page layout are not reconstructed");
+    doc.warn("DOCX_BASIC", "Body text, tables, headings from styles and outline levels, list items (bullet or numbered; decimal, letter and roman formats, with the rendered marker in source.path), footnotes, headers, footers and embedded raster images only; revisions, text boxes and page layout are not reconstructed");
     Ok(())
 }
 

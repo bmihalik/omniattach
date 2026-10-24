@@ -100,3 +100,40 @@ fn docx_numbered_paragraphs_use_numbering_format() {
     assert!(matches!(doc.blocks[1].kind, BlockKind::ListItem { ordered: false }));
     assert_eq!(doc.blocks[1].source.path.as_deref(), Some("list-level:1"));
 }
+
+#[test]
+fn docx_list_markers_count_and_restart() {
+    let numbering = format!(
+        r#"<w:numbering xmlns:w="{DOC_NS}"><w:abstractNum w:abstractNumId="0"><w:lvl w:ilvl="0"><w:start w:val="1"/><w:numFmt w:val="decimal"/><w:lvlText w:val="%1."/></w:lvl><w:lvl w:ilvl="1"><w:start w:val="1"/><w:numFmt w:val="lowerLetter"/><w:lvlText w:val="%2)"/></w:lvl></w:abstractNum><w:num w:numId="7"><w:abstractNumId w:val="0"/></w:num></w:numbering>"#
+    );
+    let item = |ilvl: u8, text: &str| {
+        format!(
+            r#"<w:p><w:pPr><w:numPr><w:ilvl w:val="{ilvl}"/><w:numId w:val="7"/></w:numPr></w:pPr><w:r><w:t>{text}</w:t></w:r></w:p>"#
+        )
+    };
+    let body = document(&format!(
+        "{}{}{}{}",
+        item(0, "First"),
+        item(0, "Second"),
+        item(1, "Sub"),
+        item(0, "Third")
+    ));
+    let doc = read(
+        "a.docx",
+        &[("word/document.xml", &body), ("word/numbering.xml", &numbering)],
+    );
+    let paths: Vec<Option<&str>> = doc
+        .blocks
+        .iter()
+        .map(|b| b.source.path.as_deref())
+        .collect();
+    assert_eq!(
+        paths,
+        vec![
+            Some("list-level:0;marker:1."),
+            Some("list-level:0;marker:2."),
+            Some("list-level:1;marker:a)"),
+            Some("list-level:0;marker:3."),
+        ]
+    );
+}
