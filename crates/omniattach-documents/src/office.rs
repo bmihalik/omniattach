@@ -284,15 +284,13 @@ pub(crate) fn pptx(doc: &mut Document, bytes: &[u8], options: &Options) -> Resul
         for target in rel_targets(&mut pkg, &member, "/image", options)? {
             owners.entry(target).or_insert(slide);
         }
-        let mut shapes: Vec<Node<'_, '_>> = xml
-            .descendants()
-            .find(|n| is(*n, P, "spTree"))
-            .map(|tree| {
-                tree.children()
-                    .filter(|n| is(*n, P, "sp") || is(*n, P, "graphicFrame") || is(*n, P, "grpSp"))
-                    .collect()
-            })
-            .unwrap_or_default();
+        let mut shapes: Vec<Node<'_, '_>> = match xml.descendants().find(|n| is(*n, P, "spTree")) {
+            Some(tree) => tree
+                .children()
+                .filter(|n| is(*n, P, "sp") || is(*n, P, "graphicFrame") || is(*n, P, "grpSp"))
+                .collect(),
+            None => vec![xml.root_element()],
+        };
         shapes.sort_by_key(|n| shape_position(*n));
         for shape in shapes {
             for tbl in shape.descendants().filter(|n| is(*n, A, "tbl")) {
