@@ -30,13 +30,5 @@ calamine = { version = "0.37", optional = true }
 lopdf = { version = "0.46", default-features = false, optional = true }
 
 [[example]]
-name = "convert"
+name = "documents-convert"
 path = "examples/convert.rs"
-
-[profile.dev]
-debug = 0
-incremental = false
-
-[profile.test]
-debug = 0
-incremental = false
