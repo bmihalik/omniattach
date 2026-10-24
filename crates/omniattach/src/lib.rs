@@ -14,6 +14,8 @@
 mod backend_adapter;
 mod bundle;
 mod context;
+#[cfg(feature = "documents")]
+mod documents_defaults;
 mod documents_adapter;
 mod engine;
 mod error;

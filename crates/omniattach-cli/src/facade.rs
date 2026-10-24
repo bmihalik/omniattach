@@ -1,4 +1,4 @@
-//! Targets the omniattach facade 0.1 public API delivered earlier in this conversation.
+//! Targets the omniattach facade public API.
 //! This module is compiled by the real workspace, not by the no-sibling verification harness.
 use crate::{CliError, Result, Runtime, args::ProgressMode, service::*};
 use omniattach::{ConversionRequest, FacadeContext, Format, Goal, NdjsonProgress, OmniAttach};
@@ -15,6 +15,10 @@ impl FacadeEngine {
         let mut builder = OmniAttach::builder()
             .with_portable_defaults()
             .map_err(map_error)?;
+        #[cfg(feature = "documents")]
+        {
+            builder = builder.with_document_defaults().map_err(map_error)?;
+        }
         if config.external_backends {
             #[cfg(feature = "backends")]
             {
@@ -116,9 +120,7 @@ fn request(input: &EngineRequest) -> Result<ConversionRequest> {
 }
 impl Engine for FacadeEngine {
     fn capabilities(&self) -> Result<Value> {
-        Ok(
-            json!({"routes":self.engine.capabilities(),"conversion_enabled":true,"installed_tools_probed":false,"documents_auto_registered":false}),
-        )
+        Ok(json!({"routes":self.engine.capabilities(),"conversion_enabled":true,"installed_tools_probed":false,"documents_auto_registered":cfg!(feature = "documents")}))
     }
     fn plan(&self, input: &EngineRequest) -> Result<Value> {
         let plan = self
@@ -138,8 +140,7 @@ impl Engine for FacadeEngine {
             .engine
             .convert(&request(input)?, &context)
             .map_err(map_error)?;
-        // Export while the bundle owns its temporary directory. Never print expired asset paths
-        // as the only means to access results.
+        // Export while the bundle owns its temporary directory.
         bundle.export(output).map_err(map_error)?;
         let manifest = serde_json::to_value(bundle.manifest())?;
         let text = bundle.plain_text();
@@ -160,8 +161,6 @@ pub fn map_error(error: omniattach::Error) -> CliError {
         E::Io(_) => ("IO_ERROR", 3),
         E::InvalidInput(_) => ("INVALID_INPUT", 3),
         E::Json(_) | E::InvalidOutput(_) | E::Converter { .. } => ("CONVERSION_FAILED", 1),
-        // Optional nested backend error variants belong to the backend crate and are not
-        // classified by guessed text messages or uninspected error enum variants.
         #[allow(unreachable_patterns)]
         _ => ("CONVERSION_FAILED", 1),
     };

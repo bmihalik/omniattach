@@ -38,16 +38,70 @@ fn actual_facade_markdown_conversion_exports_before_json_is_printed() {
     }
 }
 #[test]
-fn actual_facade_does_not_invent_an_office_parser() {
+fn actual_facade_routes_office_zip_to_documents_at_plan() {
     let d = tempfile::tempdir().unwrap();
     let p = d.path().join("fake.docx");
     std::fs::write(&p, b"PK\x03\x04").unwrap();
     let o = run(&["plan", p.to_str().unwrap()]);
-    assert_eq!(o.status.code(), Some(4));
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    assert_eq!(
+        serde_json::from_slice::<Value>(&o.stdout).unwrap()["plan"]["route"]["id"],
+        "documents"
+    );
+}
+#[test]
+fn actual_facade_malformed_office_package_fails_without_export() {
+    let d = tempfile::tempdir().unwrap();
+    let p = d.path().join("fake.docx");
+    std::fs::write(&p, b"PK\x03\x04").unwrap();
+    let output = d.path().join("out");
+    let o = run(&["convert", p.to_str().unwrap(), "--output", output.to_str().unwrap()]);
+    assert_eq!(o.status.code(), Some(1));
     assert_eq!(
         serde_json::from_slice::<Value>(&o.stderr).unwrap()["error"]["code"],
-        "NO_ROUTE"
+        "CONVERSION_FAILED"
     );
+    assert!(!output.exists());
+}
+#[test]
+fn xml_without_mapping_fails_with_clear_invalid_argument() {
+    let d = tempfile::tempdir().unwrap();
+    let p = d.path().join("data.xml");
+    std::fs::write(&p, b"<measurements/>").unwrap();
+    let output = d.path().join("out");
+    let o = run(&["convert", p.to_str().unwrap(), "--output", output.to_str().unwrap()]);
+    assert_eq!(o.status.code(), Some(2));
+    let e: Value = serde_json::from_slice(&o.stderr).unwrap();
+    assert_eq!(e["error"]["code"], "INVALID_ARGUMENT");
+    assert!(
+        e["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("explicit column mapping")
+    );
+    assert!(!output.exists());
+}
+#[test]
+fn csv_tables_goal_exports_table_csv_through_documents_route() {
+    let d = tempfile::tempdir().unwrap();
+    let p = d.path().join("measurements.csv");
+    std::fs::write(&p, "sample,value\n001,1.2300\n").unwrap();
+    let output = d.path().join("out");
+    let o = run(&[
+        "convert",
+        p.to_str().unwrap(),
+        "--goal",
+        "tables",
+        "--output",
+        output.to_str().unwrap(),
+    ]);
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    assert_eq!(
+        serde_json::from_slice::<Value>(&o.stdout).unwrap()["manifest"]["route"]["id"],
+        "documents"
+    );
+    let csv = std::fs::read_to_string(output.join("table-0001.csv")).unwrap();
+    assert!(csv.contains("sample,value") && csv.contains("001,1.2300"));
 }
 #[test]
 fn actual_facade_plan_does_not_create_output_or_run_conversion() {

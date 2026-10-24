@@ -11,10 +11,11 @@ name = "omniattach"
 path = "src/main.rs"
 
 [features]
-default = ["facade"]
+default = ["facade", "documents"]
 facade = ["dep:omniattach"]
+documents = ["facade", "omniattach/documents"]
 backends = ["facade", "omniattach/backends"]
-workspace = ["backends", "omniattach/core", "omniattach/documents"]
+workspace = ["backends", "documents", "omniattach/core"]
 
 [dependencies]
 clap = { version = "4.5", features = ["derive"] }
