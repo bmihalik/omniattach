@@ -17,6 +17,8 @@ const TABLE: &str = "urn:oasis:names:tc:opendocument:xmlns:table:1.0";
 const XLINK: &str = "http://www.w3.org/1999/xlink";
 /// Upper bound for one <text:s text:c="N"/> run, so a hostile count cannot blow up memory.
 const MAX_SPACE_RUN: usize = 1000;
+/// Maximum basedOn hops when resolving inherited heading styles, so cycles cannot loop forever.
+const MAX_STYLE_DEPTH: usize = 16;
 fn is(node: Node<'_, '_>, uri: &str, name: &str) -> bool {
     node.has_tag_name((uri, name))
 }
@@ -163,8 +165,139 @@ fn rel_targets(
     Ok(out)
 }
 
+/// Paragraph style facts needed to resolve inherited headings.
+struct StyleInfo {
+    name: String,
+    based_on: Option<String>,
+    outline: Option<u8>,
+}
+
+fn docx_styles(pkg: &mut Package<'_>, options: &Options) -> Result<BTreeMap<String, StyleInfo>> {
+    let mut out = BTreeMap::new();
+    if !pkg.contains("word/styles.xml") {
+        return Ok(out);
+    }
+    let text = pkg.text("word/styles.xml")?;
+    let tree = xml::parse(&text, options)?;
+    for style in tree.descendants().filter(|n| is(*n, W, "style")) {
+        let Some(id) = style.attribute((W, "styleId")) else {
+            continue;
+        };
+        let name = style
+            .children()
+            .find(|n| is(*n, W, "name"))
+            .and_then(|n| n.attribute((W, "val")))
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        let based_on = style
+            .children()
+            .find(|n| is(*n, W, "basedOn"))
+            .and_then(|n| n.attribute((W, "val")))
+            .map(str::to_owned);
+        let outline = style
+            .descendants()
+            .find(|n| is(*n, W, "outlineLvl"))
+            .and_then(|n| n.attribute((W, "val")))
+            .and_then(|v| v.parse::<u8>().ok())
+            .map(|v| v.saturating_add(1));
+        out.insert(
+            id.to_owned(),
+            StyleInfo {
+                name,
+                based_on,
+                outline,
+            },
+        );
+    }
+    Ok(out)
+}
+
+/// Heading level from a style, or from the nearest ancestor style that defines one.
+fn style_heading_level(styles: &BTreeMap<String, StyleInfo>, id: &str) -> Option<u8> {
+    let mut current = Some(id.to_owned());
+    for _ in 0..MAX_STYLE_DEPTH {
+        let style = styles.get(current.as_deref()?)?;
+        if let Some(rest) = style.name.strip_prefix("heading ")
+            && let Ok(level) = rest.trim().parse::<u8>()
+        {
+            return Some(level);
+        }
+        if let Some(level) = style.outline {
+            return Some(level);
+        }
+        current = style.based_on.clone();
+    }
+    None
+}
+
+/// Footnotes, headers and footers, appended after the body in source-part order.
+fn docx_note_members(pkg: &Package<'_>) -> Vec<String> {
+    pkg.member_names()
+        .into_iter()
+        .map(|n| n.to_string())
+        .filter(|n| {
+            n == "word/footnotes.xml"
+                || ((n.starts_with("word/header") || n.starts_with("word/footer"))
+                    && n.ends_with(".xml"))
+        })
+        .collect()
+}
+
+fn docx_note_part(
+    doc: &mut Document,
+    pkg: &mut Package<'_>,
+    member: &str,
+    options: &Options,
+) -> Result<()> {
+    let text = pkg.text(member)?;
+    let tree = xml::parse(&text, options)?;
+    let footnote = member.ends_with("footnotes.xml");
+    let kind = if footnote {
+        "footnote"
+    } else if member.starts_with("word/header") {
+        "header"
+    } else {
+        "footer"
+    };
+    let scopes: Vec<Node<'_, '_>> = if footnote {
+        tree.descendants()
+            .filter(|n| is(*n, W, "footnote"))
+            .collect()
+    } else {
+        vec![tree.root_element()]
+    };
+    for scope in scopes {
+        let path = if footnote {
+            let id = scope
+                .attribute((W, "id"))
+                .and_then(|v| v.parse::<i64>().ok())
+                .unwrap_or(0);
+            if id < 1 {
+                continue;
+            }
+            format!("footnote:{id}")
+        } else {
+            kind.to_owned()
+        };
+        for p in scope.descendants().filter(|n| is(*n, W, "p")) {
+            let value = run_text(p, W);
+            if value.trim().is_empty() {
+                continue;
+            }
+            let mut span = xml::span(p, Some(member));
+            span.path = Some(path.clone());
+            doc.paragraph(BlockKind::Paragraph, value, span);
+            if doc.blocks.len() > options.limits.blocks {
+                return Err(Error::LimitExceeded("DOCX blocks".into()));
+            }
+        }
+    }
+    Ok(())
+}
+
 pub(crate) fn docx(doc: &mut Document, bytes: &[u8], options: &Options) -> Result<()> {
     let mut pkg = Package::open(bytes, options)?;
+    let styles = docx_styles(&mut pkg, options)?;
     let input = pkg.text("word/document.xml")?;
     let tree = xml::parse(&input, options)?;
     let mut cells = 0usize;
@@ -211,21 +344,25 @@ pub(crate) fn docx(doc: &mut Document, bytes: &[u8], options: &Options) -> Resul
             .find(|n| is(*n, W, "pStyle"))
             .and_then(|n| n.attribute((W, "val")))
             .unwrap_or("");
-        let outline = node
+        let direct_outline = node
             .descendants()
             .find(|n| is(*n, W, "outlineLvl"))
             .and_then(|n| n.attribute((W, "val")))
             .and_then(|v| v.parse::<u8>().ok())
             .map(|v| v.saturating_add(1));
-        let level = outline.or_else(|| {
-            style
-                .to_ascii_lowercase()
-                .strip_prefix("heading")
-                .and_then(|s| s.parse::<u8>().ok())
-        });
+        let level = direct_outline.or_else(|| style_heading_level(&styles, style));
         let span = xml::span(node, Some("word/document.xml"));
         if let Some(level) = level {
             doc.heading(level.clamp(1, 6), value, span);
+        } else if node.descendants().any(|n| is(n, W, "numPr")) {
+            let ilvl = node
+                .descendants()
+                .find(|n| is(*n, W, "ilvl"))
+                .and_then(|n| n.attribute((W, "val")))
+                .unwrap_or("0");
+            let mut span = span;
+            span.path = Some(format!("list-level:{ilvl}"));
+            doc.paragraph(BlockKind::ListItem { ordered: false }, value, span);
         } else {
             doc.paragraph(BlockKind::Paragraph, value, span);
         }
@@ -233,10 +370,13 @@ pub(crate) fn docx(doc: &mut Document, bytes: &[u8], options: &Options) -> Resul
             return Err(Error::LimitExceeded("DOCX blocks".into()));
         }
     }
+    for member in docx_note_members(&pkg) {
+        docx_note_part(doc, &mut pkg, &member, options)?;
+    }
     for name in media_members(&pkg, "word/media/") {
         attach(doc, &mut pkg, &name, None, options)?;
     }
-    doc.warn("DOCX_BASIC", "Main body text/tables and embedded raster images only: inherited styles, numbering, revisions, headers/footers, merges and layout are not reconstructed");
+    doc.warn("DOCX_BASIC", "Body text, tables, headings from styles and outline levels, list items (unordered; numbering formats not read), footnotes, headers, footers and embedded raster images only; revisions, text boxes and page layout are not reconstructed");
     Ok(())
 }
 
