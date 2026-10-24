@@ -44,7 +44,10 @@ impl<'a> Package<'a> {
         self.zip.index_for_name(name).is_some()
     }
     pub fn member_names(&self) -> Vec<String> {
-        self.zip.file_names().map(str::to_owned).collect()
+        self.zip
+            .file_names()
+            .filter_map(|n| n.ok().map(|s| s.into_owned()))
+            .collect()
     }
     pub fn text(&mut self, name: &str) -> Result<String> {
         let data = self.bytes(name)?;
