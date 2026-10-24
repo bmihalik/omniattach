@@ -141,10 +141,11 @@ fn image_targets(pkg: &mut Package<'_>, member: &str, options: &Options) -> Resu
     let mut out = Vec::new();
     for rel in tree.descendants().filter(|n| is(*n, REL, "Relationship")) {
         let is_image = rel.attribute("Type").is_some_and(|t| t.ends_with("/image"));
-        if is_image && rel.attribute("TargetMode") != Some("External") {
-            if let Some(target) = rel.attribute("Target") {
-                out.push(resolve(member, target)?);
-            }
+        if is_image
+            && rel.attribute("TargetMode") != Some("External")
+            && let Some(target) = rel.attribute("Target")
+        {
+            out.push(resolve(member, target)?);
         }
     }
     Ok(out)
