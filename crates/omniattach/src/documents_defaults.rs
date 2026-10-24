@@ -55,8 +55,9 @@ impl Converter for DocumentConverter {
             usize::try_from(context.policy().max_input_bytes).unwrap_or(usize::MAX);
         let bytes = std::fs::read(&input.path)?;
         context.check()?;
-        let document = omniattach_documents::extract_as(&input.source.name, &bytes, format, &options)
-            .map_err(document_error)?;
+        let document =
+            omniattach_documents::extract_as(&input.source.name, &bytes, format, &options)
+                .map_err(document_error)?;
         context.check()?;
         let mut data = ConversionData::default().payload("omniattach-documents/0.1", &document)?;
         data.text.push(TextFragment {
@@ -80,12 +81,13 @@ impl Converter for DocumentConverter {
                     let file = format!("table-{:04}.csv", index + 1);
                     let csv = table.to_csv().map_err(document_error)?;
                     std::fs::write(input.output_dir.join(&file), csv)?;
-                    data.artifacts.push(
-                        PendingArtifact::new(&file, "text/csv").located(serde_json::json!({
-                            "table_id": table.id,
-                            "name": table.name,
-                        })),
-                    );
+                    data.artifacts
+                        .push(
+                            PendingArtifact::new(&file, "text/csv").located(serde_json::json!({
+                                "table_id": table.id,
+                                "name": table.name,
+                            })),
+                        );
                 }
             }
             _ => {}

@@ -55,7 +55,12 @@ fn actual_facade_malformed_office_package_fails_without_export() {
     let p = d.path().join("fake.docx");
     std::fs::write(&p, b"PK\x03\x04").unwrap();
     let output = d.path().join("out");
-    let o = run(&["convert", p.to_str().unwrap(), "--output", output.to_str().unwrap()]);
+    let o = run(&[
+        "convert",
+        p.to_str().unwrap(),
+        "--output",
+        output.to_str().unwrap(),
+    ]);
     assert_eq!(o.status.code(), Some(1));
     assert_eq!(
         serde_json::from_slice::<Value>(&o.stderr).unwrap()["error"]["code"],
@@ -69,7 +74,12 @@ fn xml_without_mapping_fails_with_clear_invalid_argument() {
     let p = d.path().join("data.xml");
     std::fs::write(&p, b"<measurements/>").unwrap();
     let output = d.path().join("out");
-    let o = run(&["convert", p.to_str().unwrap(), "--output", output.to_str().unwrap()]);
+    let o = run(&[
+        "convert",
+        p.to_str().unwrap(),
+        "--output",
+        output.to_str().unwrap(),
+    ]);
     assert_eq!(o.status.code(), Some(2));
     let e: Value = serde_json::from_slice(&o.stderr).unwrap();
     assert_eq!(e["error"]["code"], "INVALID_ARGUMENT");

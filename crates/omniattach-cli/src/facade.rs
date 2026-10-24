@@ -120,7 +120,9 @@ fn request(input: &EngineRequest) -> Result<ConversionRequest> {
 }
 impl Engine for FacadeEngine {
     fn capabilities(&self) -> Result<Value> {
-        Ok(json!({"routes":self.engine.capabilities(),"conversion_enabled":true,"installed_tools_probed":false,"documents_auto_registered":cfg!(feature = "documents")}))
+        Ok(
+            json!({"routes":self.engine.capabilities(),"conversion_enabled":true,"installed_tools_probed":false,"documents_auto_registered":cfg!(feature = "documents")}),
+        )
     }
     fn plan(&self, input: &EngineRequest) -> Result<Value> {
         let plan = self
