@@ -15,6 +15,8 @@ const TEXT: &str = "urn:oasis:names:tc:opendocument:xmlns:text:1.0";
 const DRAW: &str = "urn:oasis:names:tc:opendocument:xmlns:drawing:1.0";
 const TABLE: &str = "urn:oasis:names:tc:opendocument:xmlns:table:1.0";
 const XLINK: &str = "http://www.w3.org/1999/xlink";
+/// Upper bound for one <text:s text:c="N"/> run, so a hostile count cannot blow up memory.
+const MAX_SPACE_RUN: usize = 1000;
 fn is(node: Node<'_, '_>, uri: &str, name: &str) -> bool {
     node.has_tag_name((uri, name))
 }
@@ -44,7 +46,12 @@ fn odf_text(node: Node<'_, '_>) -> String {
         } else if is(n, TEXT, "line-break") {
             out.push('\n');
         } else if is(n, TEXT, "s") {
-            out.push(' ');
+            let count = n
+                .attribute((TEXT, "c"))
+                .and_then(|v| v.parse::<usize>().ok())
+                .unwrap_or(1)
+                .min(MAX_SPACE_RUN);
+            out.extend(std::iter::repeat_n(' ', count));
         }
     }
     out
@@ -368,6 +375,10 @@ pub(crate) fn odf(doc: &mut Document, bytes: &[u8], slides: bool, options: &Opti
                     .and_then(|v| v.parse::<u8>().ok())
                     .unwrap_or(1);
                 doc.heading(level.clamp(1, 6), value, span);
+            } else if ancestor(node, TEXT, "list-item") {
+                let depth = node.ancestors().filter(|n| is(*n, TEXT, "list")).count();
+                span.path = Some(format!("list-level:{depth}"));
+                doc.paragraph(BlockKind::ListItem { ordered: false }, value, span);
             } else {
                 doc.paragraph(BlockKind::Paragraph, value, span);
             }
@@ -380,7 +391,7 @@ pub(crate) fn odf(doc: &mut Document, bytes: &[u8], slides: bool, options: &Opti
         let owner = owners.get(&name).copied().flatten();
         attach(doc, &mut pkg, &name, owner, options)?;
     }
-    doc.warn("ODF_BASIC", "Text/tables and embedded raster images only: lists become paragraphs, repeated text:s counts collapse to one space; merges, styles, notes and page layout are not reconstructed");
+    doc.warn("ODF_BASIC", "Text/tables and embedded raster images only: list items are marked with their nesting level in the source path but not as a nested tree; merges, styles, notes and page layout are not reconstructed");
     Ok(())
 }
 pub(crate) fn epub(doc: &mut Document, bytes: &[u8], options: &Options) -> Result<()> {
