@@ -34,3 +34,25 @@ fn odt_nested_list_items_link_to_parent_item() {
     assert_eq!(doc.blocks[2].parent_id, None);
     assert_eq!(doc.blocks[1].source.path.as_deref(), Some("list-level:2"));
 }
+
+#[test]
+fn odt_text_space_count_expands_and_is_capped() {
+    let input = ODF.replace(
+        "BODY",
+        r#"<office:text><text:p>A<text:s text:c="3"/>B<text:s text:c="5000"/>C</text:p></office:text>"#,
+    );
+    let doc = read("a.odt", &[("content.xml", &input)]);
+    assert_eq!(doc.blocks[0].text, format!("A   B{}C", " ".repeat(1000)));
+}
+
+#[test]
+fn odt_paragraph_after_list_does_not_inherit_list_parent() {
+    let input = ODF.replace(
+        "BODY",
+        r#"<office:text><text:list><text:list-item><text:p>A</text:p></text:list-item></text:list><text:p>Plain</text:p></office:text>"#,
+    );
+    let doc = read("a.odt", &[("content.xml", &input)]);
+    assert_eq!(doc.blocks.len(), 2);
+    assert_eq!(doc.blocks[1].text, "Plain");
+    assert_eq!(doc.blocks[1].parent_id, None);
+}
