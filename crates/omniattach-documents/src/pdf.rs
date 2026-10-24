@@ -1,5 +1,8 @@
 use crate::{BlockKind, Diagnostic, Document, Error, Options, Result, SourceSpan};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
+
+const MAX_OUTLINE_ITEMS: usize = 10_000;
+const MAX_OUTLINE_DEPTH: u32 = 32;
 
 pub(crate) fn extract(doc: &mut Document, bytes: &[u8], options: &Options) -> Result<()> {
     let pdf = lopdf::Document::load_mem_with_options(
@@ -21,6 +24,7 @@ pub(crate) fn extract(doc: &mut Document, bytes: &[u8], options: &Options) -> Re
     if pages.len() > options.limits.blocks {
         return Err(Error::LimitExceeded("PDF pages".into()));
     }
+    outline_headings(doc, &pdf, &pages);
     for page in pages.keys() {
         let span = SourceSpan {
             page: Some(*page),
@@ -54,8 +58,120 @@ pub(crate) fn extract(doc: &mut Document, bytes: &[u8], options: &Options) -> Re
             }
         }
     }
-    doc.warn("PDF_TEXT_ONLY", "PDF text/content-stream order only; no OCR, layout reconstruction, headings, tables or equations. Embedded JPEG and JPEG 2000 images are extracted as assets; other image encodings are reported as skipped");
+    doc.warn("PDF_TEXT_ONLY", "PDF text/content-stream order only; bookmarks become headings; no OCR, layout reconstruction, tables or equations. Embedded JPEG and JPEG 2000 images are extracted as assets; other image encodings are reported as skipped");
     Ok(())
+}
+
+fn dict_of<'a>(pdf: &'a lopdf::Document, object: &'a lopdf::Object) -> Option<&'a lopdf::Dictionary> {
+    match object {
+        lopdf::Object::Dictionary(dictionary) => Some(dictionary),
+        lopdf::Object::Reference(id) => pdf.get_dictionary(*id).ok(),
+        _ => None,
+    }
+}
+
+/// PDF text strings are UTF-16BE when they start with the FE FF byte order mark.
+fn decode_pdf_text(bytes: &[u8]) -> String {
+    if let Some(rest) = bytes.strip_prefix(&[0xFE, 0xFF]) {
+        let units: Vec<u16> = rest
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|c| u16::from_be_bytes(*c))
+            .collect();
+        return String::from_utf16_lossy(&units);
+    }
+    String::from_utf8(bytes.to_vec()).unwrap_or_else(|_| bytes.iter().map(|&b| b as char).collect())
+}
+
+/// Bookmarks become headings in outline order, before page text. Named destinations are not resolved.
+fn outline_headings(doc: &mut Document, pdf: &lopdf::Document, pages: &BTreeMap<u32, lopdf::ObjectId>) {
+    let Ok(root) = pdf.trailer.get(b"Root") else {
+        return;
+    };
+    let Some(catalog) = dict_of(pdf, root) else {
+        return;
+    };
+    let Some(outlines) = catalog.get(b"Outlines").ok().and_then(|o| dict_of(pdf, o)) else {
+        return;
+    };
+    let Ok(first) = outlines.get(b"First") else {
+        return;
+    };
+    let page_numbers: BTreeMap<lopdf::ObjectId, u32> =
+        pages.iter().map(|(number, id)| (*id, *number)).collect();
+    let mut visited = BTreeSet::new();
+    let mut count = 0usize;
+    walk_outline(doc, pdf, &page_numbers, Some(first), 1, &mut visited, &mut count);
+}
+
+fn walk_outline<'a>(
+    doc: &mut Document,
+    pdf: &'a lopdf::Document,
+    page_numbers: &BTreeMap<lopdf::ObjectId, u32>,
+    mut current: Option<&'a lopdf::Object>,
+    depth: u32,
+    visited: &mut BTreeSet<lopdf::ObjectId>,
+    count: &mut usize,
+) {
+    while let Some(object) = current {
+        if let lopdf::Object::Reference(id) = object
+            && !visited.insert(*id)
+        {
+            return;
+        }
+        if depth > MAX_OUTLINE_DEPTH || *count >= MAX_OUTLINE_ITEMS {
+            doc.warn(
+                "PDF_OUTLINE_TRUNCATED",
+                "bookmark tree exceeds the depth or item budget; remaining bookmarks are not extracted",
+            );
+            return;
+        }
+        let Some(item) = dict_of(pdf, object) else {
+            return;
+        };
+        *count += 1;
+        let title = item
+            .get(b"Title")
+            .ok()
+            .and_then(|t| t.as_str().ok())
+            .map(decode_pdf_text)
+            .unwrap_or_default();
+        if !title.trim().is_empty() {
+            let page = destination_page(pdf, item, page_numbers);
+            let span = SourceSpan {
+                page,
+                path: Some("outline".into()),
+                ..Default::default()
+            };
+            let title_before = doc.title.clone();
+            doc.heading(depth.clamp(1, 6) as u8, title, span);
+            doc.title = title_before;
+        }
+        if let Ok(child) = item.get(b"First") {
+            walk_outline(doc, pdf, page_numbers, Some(child), depth + 1, visited, count);
+        }
+        current = item.get(b"Next").ok();
+    }
+}
+
+/// Page number of a bookmark's destination, from /Dest or /A /GoTo /D. Named destinations give None.
+fn destination_page(
+    pdf: &lopdf::Document,
+    item: &lopdf::Dictionary,
+    page_numbers: &BTreeMap<lopdf::ObjectId, u32>,
+) -> Option<u32> {
+    let dest = item
+        .get(b"Dest")
+        .ok()
+        .or_else(|| dict_of(pdf, item.get(b"A").ok()?)?.get(b"D").ok())?;
+    let lopdf::Object::Array(target) = dest else {
+        return None;
+    };
+    let lopdf::Object::Reference(id) = target.first()? else {
+        return None;
+    };
+    page_numbers.get(id).copied()
 }
 
 fn skip_image(doc: &mut Document, page: u32, id: lopdf::ObjectId, message: String) {
