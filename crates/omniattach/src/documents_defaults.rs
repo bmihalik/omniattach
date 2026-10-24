@@ -29,6 +29,21 @@ fn document_format(format: Format) -> Option<DocFormat> {
     })
 }
 
+/// Accepts only `{}`, `null`, or `{"ocr": true|false}`. OCR is off unless requested.
+fn parse_ocr_option(options: &serde_json::Value) -> Result<bool> {
+    match options {
+        serde_json::Value::Null => Ok(false),
+        serde_json::Value::Object(map) if map.keys().all(|k| k == "ocr") => match map.get("ocr") {
+            None => Ok(false),
+            Some(serde_json::Value::Bool(enabled)) => Ok(*enabled),
+            Some(_) => Err(Error::Configuration("ocr option must be a boolean".into())),
+        },
+        _ => Err(Error::Configuration(
+            "document routes accept only the ocr boolean option in 0.2.0; call omniattach-documents directly for mappings".into(),
+        )),
+    }
+}
+
 impl Converter for DocumentConverter {
     fn convert(
         &self,
@@ -37,11 +52,7 @@ impl Converter for DocumentConverter {
         context: &JobContext,
     ) -> Result<ConversionData> {
         context.check()?;
-        if request.options != serde_json::json!({}) && request.options != serde_json::Value::Null {
-            return Err(Error::Configuration(
-                "document routes accept no options in 0.2.0; call omniattach-documents directly for mappings".into(),
-            ));
-        }
+        let ocr = parse_ocr_option(&request.options)?;
         if input.format == Format::Xml {
             return Err(Error::Configuration(
                 "XML needs an explicit column mapping; records are not guessed. Use omniattach-documents::extract_xml_table".into(),
@@ -50,9 +61,33 @@ impl Converter for DocumentConverter {
         let format = document_format(input.format).ok_or_else(|| {
             Error::Configuration(format!("no document adapter for {:?}", input.format))
         })?;
+        if ocr && format != DocFormat::Pdf {
+            return Err(Error::Configuration(
+                "ocr option applies only to PDF documents".into(),
+            ));
+        }
         let mut options = Options::default();
         options.limits.input_bytes =
             usize::try_from(context.policy().max_input_bytes).unwrap_or(usize::MAX);
+        if ocr {
+            #[cfg(feature = "backends")]
+            {
+                let path = input.path.clone();
+                options.pdf_ocr = Some(omniattach_documents::PdfOcr(std::sync::Arc::new(
+                    move |page: u32| -> omniattach_documents::Result<String> {
+                        let runner = omniattach_backends::ProcessRunner;
+                        let ctx = omniattach_backends::BackendContext::new(&runner);
+                        omniattach_backends::PdfPageOcr::default()
+                            .recognize_page(&path, page, &ctx)
+                            .map_err(|e| omniattach_documents::Error::Parse(format!("OCR: {e}")))
+                    },
+                )));
+            }
+            #[cfg(not(feature = "backends"))]
+            return Err(Error::Configuration(
+                "ocr option requires the backends feature".into(),
+            ));
+        }
         let bytes = std::fs::read(&input.path)?;
         context.check()?;
         let document =
