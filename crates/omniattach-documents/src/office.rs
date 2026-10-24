@@ -4,6 +4,7 @@ use crate::{
     xml,
 };
 use roxmltree::Node;
+use std::collections::BTreeMap;
 
 const W: &str = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
 const A: &str = "http://schemas.openxmlformats.org/drawingml/2006/main";
@@ -13,6 +14,7 @@ const REL: &str = "http://schemas.openxmlformats.org/package/2006/relationships"
 const TEXT: &str = "urn:oasis:names:tc:opendocument:xmlns:text:1.0";
 const DRAW: &str = "urn:oasis:names:tc:opendocument:xmlns:drawing:1.0";
 const TABLE: &str = "urn:oasis:names:tc:opendocument:xmlns:table:1.0";
+const XLINK: &str = "http://www.w3.org/1999/xlink";
 fn is(node: Node<'_, '_>, uri: &str, name: &str) -> bool {
     node.has_tag_name((uri, name))
 }
@@ -70,6 +72,84 @@ fn new_table(
     }
     Ok(table)
 }
+
+/// Raster image types only. SVG, EMF and WMF are deliberately not extracted.
+fn raster_type(member: &str) -> Option<&'static str> {
+    let ext = member.rsplit_once('.')?.1.to_ascii_lowercase();
+    Some(match ext.as_str() {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "bmp" => "image/bmp",
+        "webp" => "image/webp",
+        "tif" | "tiff" => "image/tiff",
+        _ => return None,
+    })
+}
+
+fn media_members(pkg: &Package<'_>, prefix: &str) -> Vec<String> {
+    pkg.member_names()
+        .into_iter()
+        .filter(|n| n.starts_with(prefix) && !n.ends_with('/'))
+        .collect()
+}
+
+/// Copies one embedded image into the document, enforcing the archive byte and entry budgets.
+fn attach(
+    doc: &mut Document,
+    pkg: &mut Package<'_>,
+    member: &str,
+    slide: Option<u32>,
+    options: &Options,
+) -> Result<()> {
+    let Some(media_type) = raster_type(member) else {
+        doc.warn(
+            "ASSET_SKIPPED",
+            format!("{member}: not a supported raster image type"),
+        );
+        return Ok(());
+    };
+    let bytes = pkg.bytes(member)?;
+    let total = doc
+        .assets
+        .iter()
+        .map(|a| a.byte_length as u64)
+        .sum::<u64>()
+        .saturating_add(bytes.len() as u64);
+    if total > options.limits.archive_bytes || doc.assets.len() >= options.limits.archive_entries {
+        return Err(Error::LimitExceeded("embedded asset bytes or count".into()));
+    }
+    let filename = member.rsplit('/').next().unwrap_or(member).to_owned();
+    let source = SourceSpan {
+        member: Some(member.into()),
+        slide,
+        ..Default::default()
+    };
+    doc.asset(filename, media_type, bytes, source);
+    Ok(())
+}
+
+/// Image relationships declared by a part (for example ppt/slides/_rels/slide1.xml.rels).
+fn image_targets(pkg: &mut Package<'_>, member: &str, options: &Options) -> Result<Vec<String>> {
+    let (dir, file) = member.rsplit_once('/').unwrap_or(("", member));
+    let rels = format!("{dir}/_rels/{file}.rels");
+    if !pkg.contains(&rels) {
+        return Ok(Vec::new());
+    }
+    let text = pkg.text(&rels)?;
+    let tree = xml::parse(&text, options)?;
+    let mut out = Vec::new();
+    for rel in tree.descendants().filter(|n| is(*n, REL, "Relationship")) {
+        let is_image = rel.attribute("Type").is_some_and(|t| t.ends_with("/image"));
+        if is_image && rel.attribute("TargetMode") != Some("External") {
+            if let Some(target) = rel.attribute("Target") {
+                out.push(resolve(member, target)?);
+            }
+        }
+    }
+    Ok(out)
+}
+
 pub(crate) fn docx(doc: &mut Document, bytes: &[u8], options: &Options) -> Result<()> {
     let mut pkg = Package::open(bytes, options)?;
     let input = pkg.text("word/document.xml")?;
@@ -140,7 +220,10 @@ pub(crate) fn docx(doc: &mut Document, bytes: &[u8], options: &Options) -> Resul
             return Err(Error::LimitExceeded("DOCX blocks".into()));
         }
     }
-    doc.warn("DOCX_BASIC", "Main body text/tables only: inherited styles, numbering, revisions, headers/footers, merges, images and layout are not reconstructed");
+    for name in media_members(&pkg, "word/media/") {
+        attach(doc, &mut pkg, &name, None, options)?;
+    }
+    doc.warn("DOCX_BASIC", "Main body text/tables and embedded raster images only: inherited styles, numbering, revisions, headers/footers, merges and layout are not reconstructed");
     Ok(())
 }
 pub(crate) fn pptx(doc: &mut Document, bytes: &[u8], options: &Options) -> Result<()> {
@@ -150,6 +233,7 @@ pub(crate) fn pptx(doc: &mut Document, bytes: &[u8], options: &Options) -> Resul
     let tree = xml::parse(&presentation, options)?;
     let rels = xml::parse(&relationships, options)?;
     let mut slide = 0u32;
+    let mut owners: BTreeMap<String, u32> = BTreeMap::new();
     for item in tree.descendants().filter(|n| is(*n, P, "sldId")) {
         let id = item
             .attribute((R, "id"))
@@ -169,6 +253,9 @@ pub(crate) fn pptx(doc: &mut Document, bytes: &[u8], options: &Options) -> Resul
         let input = pkg.text(&member)?;
         let xml = xml::parse(&input, options)?;
         slide += 1;
+        for target in image_targets(&mut pkg, &member, options)? {
+            owners.entry(target).or_insert(slide);
+        }
         for node in xml.descendants().filter(|n| is(*n, A, "p")) {
             let value = run_text(node, A);
             if value.trim().is_empty() {
@@ -182,7 +269,11 @@ pub(crate) fn pptx(doc: &mut Document, bytes: &[u8], options: &Options) -> Resul
             }
         }
     }
-    doc.warn("PPTX_TEXT_ONLY", "Slide order follows presentation relationships; shape text only, not spatial reading order, notes, charts, images or previews");
+    for name in media_members(&pkg, "ppt/media/") {
+        let owner = owners.get(&name).copied();
+        attach(doc, &mut pkg, &name, owner, options)?;
+    }
+    doc.warn("PPTX_TEXT_ONLY", "Slide order follows presentation relationships; shape text and embedded raster images only, not spatial reading order, notes, charts or previews");
     Ok(())
 }
 pub(crate) fn odf(doc: &mut Document, bytes: &[u8], slides: bool, options: &Options) -> Result<()> {
@@ -194,6 +285,7 @@ pub(crate) fn odf(doc: &mut Document, bytes: &[u8], slides: bool, options: &Opti
         .filter(|n| is(*n, DRAW, "page"))
         .collect();
     let mut cells = 0usize;
+    let mut owners: BTreeMap<String, Option<u32>> = BTreeMap::new();
     for node in tree.descendants().filter(|n| n.is_element()) {
         let mut span = xml::span(node, Some("content.xml"));
         if slides {
@@ -202,6 +294,11 @@ pub(crate) fn odf(doc: &mut Document, bytes: &[u8], slides: bool, options: &Opti
                 .find(|n| is(*n, DRAW, "page"))
                 .and_then(|p| pages.iter().position(|x| *x == p))
                 .map(|n| n as u32 + 1);
+        }
+        if let Some(href) = node.attribute((XLINK, "href")).filter(|_| is(node, DRAW, "image")) {
+            owners
+                .entry(resolve("content.xml", href)?)
+                .or_insert(span.slide);
         }
         if is(node, TABLE, "table") && !ancestor(node, TABLE, "table") {
             let mut rows = Vec::new();
@@ -278,7 +375,11 @@ pub(crate) fn odf(doc: &mut Document, bytes: &[u8], slides: bool, options: &Opti
             return Err(Error::LimitExceeded("ODF blocks".into()));
         }
     }
-    doc.warn("ODF_BASIC", "Text/tables only: lists become paragraphs, repeated text:s counts collapse to one space; merges, styles, images, notes and page layout are not reconstructed");
+    for name in media_members(&pkg, "Pictures/") {
+        let owner = owners.get(&name).copied().flatten();
+        attach(doc, &mut pkg, &name, owner, options)?;
+    }
+    doc.warn("ODF_BASIC", "Text/tables and embedded raster images only: lists become paragraphs, repeated text:s counts collapse to one space; merges, styles, notes and page layout are not reconstructed");
     Ok(())
 }
 pub(crate) fn epub(doc: &mut Document, bytes: &[u8], options: &Options) -> Result<()> {
@@ -317,9 +418,19 @@ pub(crate) fn epub(doc: &mut Document, bytes: &[u8], options: &Options) -> Resul
         let html = pkg.text(&member)?;
         crate::html::extract(doc, &html, Some(&member), options)?;
     }
+    for item in tree.descendants().filter(|n| is(*n, OPF, "item")) {
+        if !item.attribute("media-type").unwrap_or("").starts_with("image/") {
+            continue;
+        }
+        let href = item
+            .attribute("href")
+            .ok_or_else(|| Error::Parse("EPUB href missing".into()))?;
+        let member = resolve(&path, href)?;
+        attach(doc, &mut pkg, &member, None, options)?;
+    }
     doc.warn(
         "EPUB_TEXT_ONLY",
-        "EPUB spine order preserved; images, navigation and DRM are not supported",
+        "EPUB spine order preserved; embedded raster images are extracted as assets; navigation and DRM are not supported",
     );
     Ok(())
 }

@@ -119,6 +119,7 @@ pub fn extract_as(name: &str, bytes: &[u8], format: Format, options: &Options) -
         blocks: Vec::new(),
         tables: Vec::new(),
         diagnostics: Vec::new(),
+        assets: Vec::new(),
     };
     match format {
         Format::Docx

@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 /// Schema-local types until a separate `omniattach-core` contract is published.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -11,6 +12,9 @@ pub struct Document {
     pub blocks: Vec<Block>,
     pub tables: Vec<Table>,
     pub diagnostics: Vec<Diagnostic>,
+    /// Embedded raster images extracted from the source package. Empty for formats without media.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub assets: Vec<ExtractedAsset>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -19,6 +23,19 @@ pub struct Source {
     pub sha256: String,
     pub byte_length: usize,
     pub encoding: Option<String>,
+}
+
+/// An embedded image copied out of the source container.
+/// `source.member` names the package member; `source.slide` is set when the owner slide is known.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ExtractedAsset {
+    pub id: String,
+    pub filename: String,
+    pub media_type: String,
+    pub sha256: String,
+    pub byte_length: usize,
+    pub bytes: Vec<u8>,
+    pub source: SourceSpan,
 }
 
 /// Positions are one-based, except decoded UTF-8 offsets (zero-based, half-open).
@@ -189,6 +206,25 @@ impl Document {
             table.source.clone(),
         );
         self.tables.push(table);
+    }
+    pub(crate) fn asset(
+        &mut self,
+        filename: String,
+        media_type: &str,
+        bytes: Vec<u8>,
+        source: SourceSpan,
+    ) {
+        let sha256 = format!("{:x}", Sha256::digest(&bytes));
+        let id = format!("{}:a{}", self.source.sha256, self.assets.len() + 1);
+        self.assets.push(ExtractedAsset {
+            id,
+            filename,
+            media_type: media_type.into(),
+            sha256,
+            byte_length: bytes.len(),
+            bytes,
+            source,
+        });
     }
     pub(crate) fn warn(&mut self, code: &str, message: impl Into<String>) {
         self.diagnostics.push(Diagnostic {

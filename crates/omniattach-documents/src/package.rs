@@ -43,7 +43,14 @@ impl<'a> Package<'a> {
     pub fn contains(&self, name: &str) -> bool {
         self.zip.index_for_name(name).is_some()
     }
+    pub fn member_names(&self) -> Vec<String> {
+        self.zip.file_names().map(str::to_owned).collect()
+    }
     pub fn text(&mut self, name: &str) -> Result<String> {
+        let data = self.bytes(name)?;
+        super::text::decode(&data, None).map(|x| x.0)
+    }
+    pub fn bytes(&mut self, name: &str) -> Result<Vec<u8>> {
         let file = self
             .zip
             .by_name(name)
@@ -53,7 +60,7 @@ impl<'a> Package<'a> {
         if data.len() as u64 > self.limit {
             return Err(Error::LimitExceeded("archive member bytes".into()));
         }
-        super::text::decode(&data, None).map(|x| x.0)
+        Ok(data)
     }
 }
 /// Resolve an internal package relationship and reject schemes, absolute paths and root escape.
