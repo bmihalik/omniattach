@@ -51,6 +51,7 @@ Review changes with `git diff` before committing. Rustfmt reads `rustfmt.toml` o
 cargo fmt --all -- --check
 cargo check --all-targets
 cargo clippy --all-targets -- -D warnings
+cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test
 ```
 

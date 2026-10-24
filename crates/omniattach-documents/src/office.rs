@@ -216,18 +216,22 @@ fn docx_styles(pkg: &mut Package<'_>, options: &Options) -> Result<BTreeMap<Stri
 fn style_heading_level(styles: &BTreeMap<String, StyleInfo>, id: &str) -> Option<u8> {
     let mut current = Some(id.to_owned());
     for _ in 0..MAX_STYLE_DEPTH {
-        let style = styles.get(current.as_deref()?)?;
+        let Some(style) = current.as_deref().and_then(|c| styles.get(c)) else {
+            break;
+        };
         if let Some(rest) = style.name.strip_prefix("heading ")
             && let Ok(level) = rest.trim().parse::<u8>()
-        {
-            return Some(level);
-        }
-        if let Some(level) = style.outline {
-            return Some(level);
-        }
-        current = style.based_on.clone();
+            {
+                return Some(level);
+            }
+            if let Some(level) = style.outline {
+                return Some(level);
+            }
+            current = style.based_on.clone();
     }
-    None
+    id.to_ascii_lowercase()
+    .strip_prefix("heading")
+    .and_then(|s| s.parse::<u8>().ok())
 }
 
 /// Footnotes, headers and footers, appended after the body in source-part order.
