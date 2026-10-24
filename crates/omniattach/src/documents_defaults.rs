@@ -2,7 +2,7 @@
 use crate::*;
 use omniattach_documents::{Format as DocFormat, Limits, Options};
 
-struct DocumentConverter;
+pub(crate) struct DocumentConverter;
 
 fn document_error(error: impl std::fmt::Display) -> Error {
     Error::Converter {
