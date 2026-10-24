@@ -1,0 +1,45 @@
+# Independent portable-facade harness: deliberately has no sibling-crate substitutes.
+[package]
+name = "omniattach"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+
+[workspace]
+
+[lib]
+path = "../src/lib.rs"
+
+[[test]]
+name = "facade"
+path = "../tests/facade.rs"
+
+[[example]]
+name = "convert"
+path = "../examples/convert.rs"
+
+[[example]]
+name = "custom"
+path = "../examples/custom.rs"
+
+[features]
+default = []
+# Names permit source cfg checks, but these integrations require the main manifest.
+core = []
+documents = []
+backends = []
+workspace = ["core", "documents", "backends"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tempfile = "3"
+sha2 = "0.10"
+
+[profile.dev]
+debug = 0
+incremental = false
+[profile.test]
+debug = 0
+incremental = false

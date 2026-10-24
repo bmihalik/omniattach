@@ -1,0 +1,29 @@
+[package]
+name = "omniattach-cli"
+version = "0.1.0"
+edition = "2024"
+description = "Machine-friendly command-line interface for omniattach file conversion"
+license = "Apache-2.0"
+readme = "README.md"
+
+[[bin]]
+name = "omniattach"
+path = "src/main.rs"
+
+[features]
+default = ["facade"]
+facade = ["dep:omniattach"]
+backends = ["facade", "omniattach/backends"]
+workspace = ["backends", "omniattach/core", "omniattach/documents"]
+
+[dependencies]
+clap = { version = "4.5", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+quick-xml = "0.40"
+ctrlc = { version = "3.5", features = ["termination"] }
+omniattach = { path = "../omniattach", default-features = false, optional = true }
+
+[dev-dependencies]
+tempfile = "3"

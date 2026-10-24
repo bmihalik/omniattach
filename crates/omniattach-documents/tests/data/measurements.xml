@@ -1,0 +1,4 @@
+<m:measurements xmlns:m="urn:measurement">
+  <m:sample id="001"><m:material>Reference A</m:material><m:value unit="ppm">1.2300</m:value><m:tag>control</m:tag><m:tag>calibration</m:tag></m:sample>
+  <m:sample id="002"><m:material>Reference B</m:material><m:value unit="ppm">0.020</m:value></m:sample>
+</m:measurements>

@@ -1,0 +1,11 @@
+{
+  "record_path": "/m:measurements/m:sample",
+  "namespaces": {"m": "urn:measurement"},
+  "columns": [
+    {"name": "id", "selector": "@id", "repeated": {"mode": "reject"}},
+    {"name": "material", "selector": "m:material", "repeated": {"mode": "reject"}},
+    {"name": "value", "selector": "m:value", "repeated": {"mode": "reject"}},
+    {"name": "unit", "selector": "m:value/@unit", "repeated": {"mode": "reject"}},
+    {"name": "tags", "selector": "m:tag", "repeated": {"mode": "json"}}
+  ]
+}

@@ -1,0 +1,25 @@
+[package]
+name = "omniattach-backends"
+version = "0.1.0"
+edition = "2024"
+description = "Local external conversion backends for the omniattach document and media pipeline"
+license = "Apache-2.0"
+readme = "README.md"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tempfile = "3"
+sha2 = "0.10"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[profile.dev]
+debug = 0
+incremental = false
+
+[profile.test]
+debug = 0
+incremental = false

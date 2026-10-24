@@ -1,0 +1,6 @@
+/target/
+crates/*/target/
+crates/*/verification/target/
+__pycache__/
+*.pyc
+Cargo.lock

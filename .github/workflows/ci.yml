@@ -1,0 +1,51 @@
+# SPDX-FileCopyrightText: 2026 Bela Istvan MIHALIK
+# SPDX-License-Identifier: Apache-2.0
+
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Install external tools for backend smoke tests
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            poppler-utils \
+            tesseract-ocr \
+            ffmpeg \
+            libreoffice-writer-nogui \
+            libreoffice-calc-nogui \
+            libreoffice-impress-nogui
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Run Clippy across workspace
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+      - name: Run workspace test suite (default features)
+        run: cargo test --workspace
+
+      - name: Run workspace test suite (all features)
+        run: cargo test --workspace --all-features
+
+      - name: Build documentation
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --workspace --all-features --no-deps
+

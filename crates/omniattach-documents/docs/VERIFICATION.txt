@@ -1,0 +1,205 @@
+rustc 1.99.1 (58cf8f9c3 2026-10-13)
+cargo 1.99.1 (5f94df478 2026-08-27)
+
+=== cargo test --locked --all-features ===
+   Compiling proc-macro2 v1.0.107
+   Compiling unicode-ident v1.0.27
+   Compiling quote v1.0.47
+   Compiling cfg-if v1.0.5
+   Compiling typenum v1.20.1
+   Compiling siphasher v1.0.4
+   Compiling libc v0.2.191
+   Compiling phf_shared v0.14.0
+   Compiling fastrand v2.5.0
+   Compiling phf_generator v0.14.0
+   Compiling hybrid-array v0.4.15
+   Compiling scopeguard v1.2.0
+   Compiling memchr v2.8.3
+   Compiling syn v3.0.9
+   Compiling syn v2.0.119
+   Compiling rustversion v1.0.23
+   Compiling smallvec v1.16.4
+   Compiling crypto-common v0.2.2
+   Compiling log v0.4.34
+   Compiling parking_lot_core v0.9.12
+   Compiling phf_macros v0.14.0
+   Compiling version_check v0.9.5
+   Compiling crc32fast v1.5.3
+   Compiling new_debug_unreachable v1.0.6
+   Compiling phf v0.14.0
+   Compiling generic-array v0.14.7
+   Compiling encoding_rs v0.8.42
+   Compiling lock_api v0.4.14
+   Compiling block-padding v0.4.2
+   Compiling phf_codegen v0.14.0
+   Compiling string_cache_codegen v0.11.2
+   Compiling getrandom v0.4.3
+   Compiling simd-adler32 v0.3.10
+   Compiling serde_core v1.0.229
+   Compiling precomputed-hash v0.1.1
+   Compiling rand_core v0.10.1
+   Compiling itoa v1.0.18
+   Compiling web_atoms v0.3.0
+   Compiling parking_lot v0.12.5
+   Compiling inout v0.2.5
+   Compiling cpufeatures v0.3.1
+   Compiling adler2 v2.0.1
+   Compiling core_detect v1.0.0
+   Compiling simdutf8 v0.1.5
+   Compiling multiversion_no_op v1.0.0
+   Compiling miniz_oxide v0.9.1
+   Compiling cipher v0.5.2
+   Compiling string_cache v0.11.0
+   Compiling block-buffer v0.12.1
+   Compiling bitflags v2.13.2
+   Compiling dtoa v1.0.11
+   Compiling const-oid v0.10.2
+   Compiling zlib-rs v0.6.8
+   Compiling hashbrown v0.17.1
+   Compiling equivalent v1.0.3
+   Compiling indexmap v2.14.2
+   Compiling digest v0.11.3
+   Compiling dtoa-short v0.3.5
+   Compiling flate2 v1.1.10
+   Compiling tendril v0.5.1
+   Compiling derive_more-impl v2.1.1
+   Compiling cssparser-macros v0.7.1
+   Compiling serde v1.0.229
+   Compiling stable_deref_trait v1.2.1
+   Compiling bumpalo v3.20.3
+   Compiling tinyvec v1.13.3
+   Compiling thiserror v2.0.21
+   Compiling alloc-no-stdlib v2.0.4
+   Compiling zmij v1.0.23
+   Compiling alloc-stdlib v0.2.4
+   Compiling unicode-normalization v0.1.26
+   Compiling derive_more v2.1.1
+   Compiling zopfli v0.8.4
+   Compiling servo_arc v0.5.0
+   Compiling cssparser v0.38.0
+   Compiling markup5ever v0.40.0
+   Compiling block-buffer v0.10.4
+   Compiling crypto-common v0.1.7
+   Compiling chacha20 v0.10.2
+   Compiling serde_derive v1.0.229
+   Compiling thiserror-impl v2.0.21
+   Compiling pulldown-cmark v0.13.5
+   Compiling rustc-hash v2.1.3
+   Compiling unicode-properties v0.1.4
+   Compiling cpubits v0.1.1
+   Compiling serde_json v1.0.154
+   Compiling typed-path v0.13.0
+   Compiling unicode-width v0.2.2
+   Compiling debug_unsafe v0.1.4
+   Compiling unicode-bidi v0.3.18
+   Compiling atoi_simd v0.18.1
+   Compiling stringprep v0.1.5
+   Compiling getopts v0.2.24
+   Compiling zip v9.1.0
+   Compiling aes v0.9.3
+   Compiling selectors v0.41.0
+   Compiling rand v0.10.3
+   Compiling digest v0.10.7
+   Compiling html5ever v0.40.1
+   Compiling brotli-decompressor v5.0.3
+   Compiling md-5 v0.11.0
+   Compiling sha2 v0.11.1
+   Compiling quick-xml v0.42.0
+   Compiling codepage v0.1.3
+   Compiling cbc v0.2.1
+   Compiling ecb v0.2.1
+   Compiling csv-core v0.1.13
+   Compiling nom v8.0.0
+   Compiling cpufeatures v0.2.17
+   Compiling unicase v2.10.0
+   Compiling ego-tree v0.11.1
+   Compiling byteorder v1.5.0
+   Compiling rangemap v1.8.0
+   Compiling fast-float2 v0.2.4
+   Compiling ryu v1.0.23
+   Compiling weezl v0.2.1
+   Compiling csv v1.4.0
+   Compiling calamine v0.37.0
+   Compiling lopdf v0.46.0
+   Compiling scraper v0.29.0
+   Compiling sha2 v0.10.9
+   Compiling roxmltree v0.21.2
+   Compiling percent-encoding v2.3.2
+   Compiling omniattach-documents v0.1.0 (/tmp/omniattach-documents)
+    Finished `test` profile [unoptimized] target(s) in 23.80s
+     Running unittests src/lib.rs (target/debug/deps/omniattach_documents-2cf6e19e77fde7ec)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/documents.rs (target/debug/deps/documents-aad50817b5c65317)
+
+running 22 tests
+test binary_disguised_as_text_and_utf32_are_rejected ... ok
+test code_is_not_prose ... ok
+test extraction_has_no_source_side_effects ... ok
+test csv_quotes_ragged_rows_and_nulls ... ok
+test heading_hierarchy_and_parents ... ok
+test headerless_tsv_and_formula_presentation ... ok
+test json_preserves_original_numbers_and_yaml_is_text ... ok
+test limits_and_unsupported ... ok
+test markdown_lists_quotes_and_rules ... ok
+test html_ignores_executable_content_and_keeps_table ... ok
+test markdown_render_does_not_emit_executable_html ... ok
+test markdown_table_and_code ... ok
+test reject_xml_entity_declarations ... ok
+test ragged_table_padding_is_bounded ... ok
+test selectors_do_not_ignore_default_namespaces ... ok
+test roundtrip_serialization_and_stable_ids ... ok
+test strict_encoding_and_explicit_fallback ... ok
+test unicode_lines_and_crlf_spans ... ok
+test xml_invalid_deeper_selector_errors_even_without_children ... ok
+test xml_mapping_validation_on_empty_result ... ok
+test xml_namespaces_attributes_missing_empty_and_mixed_content ... ok
+test xml_repeated_values_need_policy ... ok
+
+test result: ok. 22 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/packages.rs (target/debug/deps/packages-aa5a832a6d7d52b4)
+
+running 10 tests
+test docx_heading_runs_table_and_member_provenance ... ok
+test archive_budgets_and_traversal ... ok
+test explicit_workbook_format_handles_extensionless_ods ... ok
+test epub_follows_spine_and_internal_relative_paths ... ok
+test odp_slide_numbers ... ok
+test ods_nonempty_repetition_budget_is_checked_before_expansion ... ok
+test ods_values_formulas_repetitions_and_blank_tails ... ok
+test odt_headings_and_text_spaces ... ok
+test pptx_uses_relationship_order_not_filename_order ... ok
+test xlsx_cached_formula_and_actual_cell_addresses ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/pdf.rs (target/debug/deps/pdf-c7af0c1b59223207)
+
+running 2 tests
+test invalid_pdf_is_error_not_silent_empty_success ... ok
+test pdf_text_page_provenance_and_scan_diagnostic ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests omniattach_documents
+
+running 1 test
+test src/lib.rs - (line 3) ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+all doctests ran in 0.53s; merged doctests compilation took 0.53s
+
+=== cargo clippy --locked --all-targets --all-features -- -D warnings ===
+    Checking percent-encoding v2.3.2
+    Checking omniattach-documents v0.1.0 (/tmp/omniattach-documents)
+    Finished `dev` profile [unoptimized] target(s) in 11.05s
+
+=== RUSTDOCFLAGS=-D warnings cargo doc --locked --all-features --no-deps ===
+ Documenting omniattach-documents v0.1.0 (/tmp/omniattach-documents)
+    Finished `dev` profile [unoptimized] target(s) in 0.35s
+   Generated /tmp/omniattach-documents/target/doc/omniattach_documents/index.html

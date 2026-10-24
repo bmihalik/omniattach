@@ -1,0 +1,28 @@
+[package]
+name = "omniattach"
+version = "0.1.0"
+edition = "2024"
+description = "Explicit conversion orchestration facade for the omniattach workspace"
+license = "Apache-2.0"
+readme = "README.md"
+
+[features]
+default = []
+core = ["dep:omniattach-core"]
+documents = ["dep:omniattach-documents"]
+backends = ["dep:omniattach-backends"]
+workspace = ["core", "documents", "backends"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tempfile = "3"
+sha2 = "0.10"
+omniattach-core = { path = "../omniattach-core", optional = true }
+omniattach-documents = { path = "../omniattach-documents", optional = true }
+omniattach-backends = { path = "../omniattach-backends", optional = true }
+
+[[example]]
+name = "external"
+required-features = ["backends"]
