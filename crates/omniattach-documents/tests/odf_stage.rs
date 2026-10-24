@@ -56,3 +56,17 @@ fn odt_paragraph_after_list_does_not_inherit_list_parent() {
     assert_eq!(doc.blocks[1].text, "Plain");
     assert_eq!(doc.blocks[1].parent_id, None);
 }
+
+#[test]
+fn children_of_returns_nested_items() {
+    let input = ODF.replace(
+        "BODY",
+        r#"<office:text><text:list><text:list-item><text:p>A</text:p><text:list><text:list-item><text:p>B</text:p></text:list-item></text:list></text:list-item></text:list></office:text>"#,
+    );
+    let doc = read("a.odt", &[("content.xml", &input)]);
+    let children: Vec<&str> = doc
+        .children_of(&doc.blocks[0].id)
+        .map(|b| b.text.as_str())
+        .collect();
+    assert_eq!(children, vec!["B"]);
+}

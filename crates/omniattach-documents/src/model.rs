@@ -147,6 +147,12 @@ pub struct Diagnostic {
 }
 
 impl Document {
+    /// Blocks whose `parent_id` equals `block_id`, in document order.
+    pub fn children_of<'a>(&'a self, block_id: &'a str) -> impl Iterator<Item = &'a Block> + 'a {
+        self.blocks
+            .iter()
+            .filter(move |b| b.parent_id.as_deref() == Some(block_id))
+    }
     pub(crate) fn push(&mut self, kind: BlockKind, text: String, source: SourceSpan) {
         let (section_path, parent_id) = if let Some(last) = self.blocks.last() {
             (last.section_path.clone(), last.parent_id.clone())
