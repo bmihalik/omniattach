@@ -585,6 +585,8 @@ pub(crate) fn odf(doc: &mut Document, bytes: &[u8], slides: bool, options: &Opti
         .collect();
     let mut cells = 0usize;
     let mut owners: BTreeMap<String, Option<u32>> = BTreeMap::new();
+    // Open list items as (list depth, item node, block id), outermost first.
+    let mut list_stack = Vec::new();
     for node in tree.descendants().filter(|n| n.is_element()) {
         let mut span = xml::span(node, Some("content.xml"));
         if slides {
@@ -600,6 +602,7 @@ pub(crate) fn odf(doc: &mut Document, bytes: &[u8], slides: bool, options: &Opti
                 .or_insert(span.slide);
         }
         if is(node, TABLE, "table") && !ancestor(node, TABLE, "table") {
+            list_stack.clear();
             let mut rows = Vec::new();
             for row in node.descendants().filter(|n| is(*n, TABLE, "table-row")) {
                 let repeat_rows = row
@@ -661,6 +664,7 @@ pub(crate) fn odf(doc: &mut Document, bytes: &[u8], slides: bool, options: &Opti
                 continue;
             }
             if is(node, TEXT, "h") {
+                list_stack.clear();
                 let level = node
                     .attribute((TEXT, "outline-level"))
                     .and_then(|v| v.parse::<u8>().ok())
@@ -668,9 +672,35 @@ pub(crate) fn odf(doc: &mut Document, bytes: &[u8], slides: bool, options: &Opti
                 doc.heading(level.clamp(1, 6), value, span);
             } else if ancestor(node, TEXT, "list-item") {
                 let depth = node.ancestors().filter(|n| is(*n, TEXT, "list")).count();
+                let item = node
+                    .ancestors()
+                    .find(|n| is(*n, TEXT, "list-item"))
+                    .map(|n| n.id());
                 span.path = Some(format!("list-level:{depth}"));
+                let continuation = list_stack
+                    .last()
+                    .is_some_and(|(_, top_item, _): &(usize, _, String)| *top_item == item);
+                if !continuation {
+                    while list_stack
+                        .last()
+                        .is_some_and(|(d, _, _): &(usize, _, String)| *d >= depth)
+                    {
+                        list_stack.pop();
+                    }
+                }
+                let parent: Option<String> = list_stack.last().map(|(_, _, id)| id.clone());
                 doc.paragraph(BlockKind::ListItem { ordered: false }, value, span);
+                if !continuation {
+                    if let Some(block) = doc.blocks.last_mut()
+                        && let Some(parent) = parent
+                    {
+                        block.parent_id = Some(parent);
+                    }
+                    let id = doc.blocks.last().map(|b| b.id.clone()).unwrap_or_default();
+                    list_stack.push((depth, item, id));
+                }
             } else {
+                list_stack.clear();
                 doc.paragraph(BlockKind::Paragraph, value, span);
             }
         }
@@ -682,7 +712,7 @@ pub(crate) fn odf(doc: &mut Document, bytes: &[u8], slides: bool, options: &Opti
         let owner = owners.get(&name).copied().flatten();
         attach(doc, &mut pkg, &name, owner, options)?;
     }
-    doc.warn("ODF_BASIC", "Text/tables and embedded raster images only: list items are marked with their nesting level in the source path but not as a nested tree; merges, styles, notes and page layout are not reconstructed");
+    doc.warn("ODF_BASIC", "Text/tables and embedded raster images only: nested list items link to their enclosing item through parent_id and carry their list depth in the source path; merges, styles, notes and page layout are not reconstructed");
     Ok(())
 }
 pub(crate) fn epub(doc: &mut Document, bytes: &[u8], options: &Options) -> Result<()> {
