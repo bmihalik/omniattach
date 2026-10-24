@@ -136,4 +136,6 @@ fn docx_list_markers_count_and_restart() {
             Some("list-level:0;marker:3."),
         ]
     );
+    let texts: Vec<&str> = doc.blocks.iter().map(|b| b.text.as_str()).collect();
+    assert_eq!(texts, vec!["1. First", "2. Second", "a) Sub", "3. Third"]);
 }

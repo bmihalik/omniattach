@@ -553,7 +553,12 @@ pub(crate) fn docx(doc: &mut Document, bytes: &[u8], options: &Options) -> Resul
             } else {
                 format!("list-level:{ilvl};marker:{marker}")
             });
-            doc.paragraph(BlockKind::ListItem { ordered }, value, span);
+            let text = if marker.is_empty() {
+                value
+            } else {
+                format!("{marker} {value}")
+            };
+            doc.paragraph(BlockKind::ListItem { ordered }, text, span);
         } else {
             doc.paragraph(BlockKind::Paragraph, value, span);
         }
@@ -567,7 +572,7 @@ pub(crate) fn docx(doc: &mut Document, bytes: &[u8], options: &Options) -> Resul
     for name in media_members(&pkg, "word/media/") {
         attach(doc, &mut pkg, &name, None, options)?;
     }
-    doc.warn("DOCX_BASIC", "Body text, tables, headings from styles and outline levels, list items (bullet or numbered; decimal, letter and roman formats, with the rendered marker in source.path), footnotes, headers, footers and embedded raster images only; revisions, text boxes and page layout are not reconstructed");
+    doc.warn("DOCX_BASIC", "Body text, tables, headings from styles and outline levels, list items (bullet or numbered; decimal, letter and roman formats; ordered items show their marker as a text prefix and in source.path), footnotes, headers, footers and embedded raster images only; revisions, text boxes and page layout are not reconstructed");
     Ok(())
 }
 
