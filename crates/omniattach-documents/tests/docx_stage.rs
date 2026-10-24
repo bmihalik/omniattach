@@ -139,3 +139,16 @@ fn docx_list_markers_count_and_restart() {
     let texts: Vec<&str> = doc.blocks.iter().map(|b| b.text.as_str()).collect();
     assert_eq!(texts, vec!["1. First", "2. Second", "a) Sub", "3. Third"]);
 }
+
+#[test]
+fn docx_text_box_paragraphs_are_separate_blocks() {
+    let body = document(
+        r#"<w:p><w:r><w:t>Anchor</w:t></w:r><w:r><w:pict><v:shape xmlns:v="urn:schemas-microsoft-com:vml"><v:textbox><w:txbxContent><w:p><w:r><w:t>Boxed</w:t></w:r></w:p></w:txbxContent></v:textbox></v:shape></w:pict></w:r></w:p>"#,
+    );
+    let doc = read("a.docx", &[("word/document.xml", &body)]);
+    assert_eq!(doc.blocks.len(), 2);
+    assert_eq!(doc.blocks[0].text, "Anchor");
+    assert_eq!(doc.blocks[0].source.path, None);
+    assert_eq!(doc.blocks[1].text, "Boxed");
+    assert_eq!(doc.blocks[1].source.path.as_deref(), Some("textbox"));
+}

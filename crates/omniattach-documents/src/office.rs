@@ -38,6 +38,36 @@ fn run_text(node: Node<'_, '_>, uri: &str) -> String {
     }
     out
 }
+/// True when `n` sits inside a text box that is itself inside `top`.
+fn in_textbox_below(n: Node<'_, '_>, top: Node<'_, '_>) -> bool {
+    n.ancestors()
+        .take_while(|a| *a != top)
+        .any(|a| is(a, W, "txbxContent"))
+}
+/// Like run_text, but skips text that belongs to text boxes inside `top`.
+fn run_text_outside_textboxes(top: Node<'_, '_>, uri: &str) -> String {
+    let mut out = String::new();
+    for n in top
+        .descendants()
+        .filter(|n| n.is_element() && !in_textbox_below(*n, top))
+    {
+        if is(n, uri, "t") {
+            out.push_str(&xml::text(n));
+        } else if is(n, uri, "tab") {
+            out.push('\t');
+        } else if is(n, uri, "br") || is(n, uri, "cr") {
+            out.push('\n');
+        }
+    }
+    out
+}
+/// Paragraphs inside text boxes that belong to `anchor` (nested text boxes included).
+fn textbox_paragraphs<'a, 'input>(anchor: Node<'a, 'input>) -> Vec<Node<'a, 'input>> {
+    anchor
+        .descendants()
+        .filter(|n| is(*n, W, "p") && in_textbox_below(*n, anchor))
+        .collect()
+}
 fn odf_text(node: Node<'_, '_>) -> String {
     let mut out = String::new();
     for n in node.descendants() {
@@ -497,73 +527,85 @@ pub(crate) fn docx(doc: &mut Document, bytes: &[u8], options: &Options) -> Resul
                 options,
             )?);
         }
-        if !is(node, W, "p") || ancestor(node, W, "tbl") {
+        if !is(node, W, "p") || ancestor(node, W, "tbl") || ancestor(node, W, "txbxContent") {
             continue;
         }
-        let value = run_text(node, W);
-        if value.trim().is_empty() {
-            continue;
-        }
-        let style = node
-            .descendants()
-            .find(|n| is(*n, W, "pStyle"))
-            .and_then(|n| n.attribute((W, "val")))
-            .unwrap_or("");
-        let direct_outline = node
-            .descendants()
-            .find(|n| is(*n, W, "outlineLvl"))
-            .and_then(|n| n.attribute((W, "val")))
-            .and_then(|v| v.parse::<u8>().ok())
-            .map(|v| v.saturating_add(1));
-        let level = direct_outline.or_else(|| style_heading_level(&styles, style));
-        let span = xml::span(node, Some("word/document.xml"));
-        if let Some(level) = level {
-            doc.heading(level.clamp(1, 6), value, span);
-        } else if let Some(num_pr) = node.descendants().find(|n| is(*n, W, "numPr")) {
-            let ilvl_text = num_pr
-                .children()
-                .find(|n| is(*n, W, "ilvl"))
-                .and_then(|n| n.attribute((W, "val")))
-                .unwrap_or("0");
-            let num_id = num_pr
-                .children()
-                .find(|n| is(*n, W, "numId"))
+        let value = run_text_outside_textboxes(node, W);
+        let textboxes = textbox_paragraphs(node);
+        if !value.trim().is_empty() {
+            let style = node
+                .descendants()
+                .find(|n| is(*n, W, "pStyle"))
                 .and_then(|n| n.attribute((W, "val")))
                 .unwrap_or("");
-            let ilvl = ilvl_text.parse::<u8>().unwrap_or(0);
-            let empty: BTreeMap<u8, NumLevel> = BTreeMap::new();
-            let levels = numbering.get(num_id).unwrap_or(&empty);
-            let ordered = levels
-                .get(&ilvl)
-                .is_some_and(|d| !matches!(d.format.as_str(), "bullet" | "none"));
-            let mut marker = String::new();
-            if let Some(def) = levels.get(&ilvl) {
-                let c = counters
-                    .entry((num_id.to_owned(), ilvl))
-                    .or_insert(def.start.saturating_sub(1));
-                *c += 1;
-                counters.retain(|(n, l), _| !(n.as_str() == num_id && *l > ilvl));
-                if ordered {
-                    marker = render_marker(&counters, num_id, levels, ilvl);
+            let direct_outline = node
+                .descendants()
+                .find(|n| is(*n, W, "outlineLvl"))
+                .and_then(|n| n.attribute((W, "val")))
+                .and_then(|v| v.parse::<u8>().ok())
+                .map(|v| v.saturating_add(1));
+            let level = direct_outline.or_else(|| style_heading_level(&styles, style));
+            let span = xml::span(node, Some("word/document.xml"));
+            if let Some(level) = level {
+                doc.heading(level.clamp(1, 6), value, span);
+            } else if let Some(num_pr) = node.descendants().find(|n| is(*n, W, "numPr")) {
+                let ilvl_text = num_pr
+                    .children()
+                    .find(|n| is(*n, W, "ilvl"))
+                    .and_then(|n| n.attribute((W, "val")))
+                    .unwrap_or("0");
+                let num_id = num_pr
+                    .children()
+                    .find(|n| is(*n, W, "numId"))
+                    .and_then(|n| n.attribute((W, "val")))
+                    .unwrap_or("");
+                let ilvl = ilvl_text.parse::<u8>().unwrap_or(0);
+                let empty: BTreeMap<u8, NumLevel> = BTreeMap::new();
+                let levels = numbering.get(num_id).unwrap_or(&empty);
+                let ordered = levels
+                    .get(&ilvl)
+                    .is_some_and(|d| !matches!(d.format.as_str(), "bullet" | "none"));
+                let mut marker = String::new();
+                if let Some(def) = levels.get(&ilvl) {
+                    let c = counters
+                        .entry((num_id.to_owned(), ilvl))
+                        .or_insert(def.start.saturating_sub(1));
+                    *c += 1;
+                    counters.retain(|(n, l), _| !(n.as_str() == num_id && *l > ilvl));
+                    if ordered {
+                        marker = render_marker(&counters, num_id, levels, ilvl);
+                    }
                 }
+                let mut span = span;
+                span.path = Some(if marker.is_empty() {
+                    format!("list-level:{ilvl}")
+                } else {
+                    format!("list-level:{ilvl};marker:{marker}")
+                });
+                let text = if marker.is_empty() {
+                    value
+                } else {
+                    format!("{marker} {value}")
+                };
+                doc.paragraph(BlockKind::ListItem { ordered }, text, span);
+            } else {
+                doc.paragraph(BlockKind::Paragraph, value, span);
             }
-            let mut span = span;
-            span.path = Some(if marker.is_empty() {
-                format!("list-level:{ilvl}")
-            } else {
-                format!("list-level:{ilvl};marker:{marker}")
-            });
-            let text = if marker.is_empty() {
-                value
-            } else {
-                format!("{marker} {value}")
-            };
-            doc.paragraph(BlockKind::ListItem { ordered }, text, span);
-        } else {
-            doc.paragraph(BlockKind::Paragraph, value, span);
+            if doc.blocks.len() > options.limits.blocks {
+                return Err(Error::LimitExceeded("DOCX blocks".into()));
+            }
         }
-        if doc.blocks.len() > options.limits.blocks {
-            return Err(Error::LimitExceeded("DOCX blocks".into()));
+        for tb in textboxes {
+            let text = run_text_outside_textboxes(tb, W);
+            if text.trim().is_empty() {
+                continue;
+            }
+            let mut span = xml::span(tb, Some("word/document.xml"));
+            span.path = Some("textbox".into());
+            doc.paragraph(BlockKind::Paragraph, text, span);
+            if doc.blocks.len() > options.limits.blocks {
+                return Err(Error::LimitExceeded("DOCX blocks".into()));
+            }
         }
     }
     for member in docx_note_members(&pkg) {
@@ -572,7 +614,7 @@ pub(crate) fn docx(doc: &mut Document, bytes: &[u8], options: &Options) -> Resul
     for name in media_members(&pkg, "word/media/") {
         attach(doc, &mut pkg, &name, None, options)?;
     }
-    doc.warn("DOCX_BASIC", "Body text, tables, headings from styles and outline levels, list items (bullet or numbered; decimal, letter and roman formats; ordered items show their marker as a text prefix and in source.path), footnotes, headers, footers and embedded raster images only; revisions, text boxes and page layout are not reconstructed");
+    doc.warn("DOCX_BASIC", "Body text, tables, headings from styles and outline levels, list items (ordered or bullet from numbering.xml; list level in source path), text boxes as separate blocks (source.path textbox), footnotes, headers, footers and embedded raster images only; revisions and page layout are not reconstructed");
     Ok(())
 }
 
