@@ -115,9 +115,7 @@ fn pdf_ocr_option_recognizes_scanned_pages() {
 
     let request = ConversionRequest::new(pdf, Goal::Extract)
         .with_route("documents")
-        .with_options(
-            serde_json::json!({"ocr": true, "ocr_language": "eng", "ocr_dpi": 300}),
-        );
+        .with_options(serde_json::json!({"ocr": true, "ocr_language": "eng", "ocr_dpi": 300}));
     let bundle = engine
         .convert(&request, &FacadeContext::default())
         .expect("OCR conversion succeeds");
