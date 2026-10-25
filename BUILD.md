@@ -33,11 +33,20 @@ Binaries are written to `target/debug/` or `target/release/`.
 
 ## 4. Testing
 
+```bash
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+cargo test --workspace --all-features
+```
+
+```bash
+scripts/test_pdf_ocr.sh
+```
+
+Direct tesing
+```bash
 OMNIATTACH_SCANNED_PDF=/path/to/scan.pdf OMNIATTACH_EXPECTED_OCR_TEXT=word \
   cargo test -p omniattach --features workspace --test pdf_ocr_route -- --ignored
-
-cargo test --workspace --all-features
-
+```
 
 ## 5. Formatting
 
@@ -54,7 +63,6 @@ Review changes with `git diff` before committing. Rustfmt reads `rustfmt.toml` o
 cargo fmt --all -- --check
 cargo check --all-targets
 cargo clippy --all-targets -- -D warnings
-cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test
 ```
 
