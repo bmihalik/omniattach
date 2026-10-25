@@ -2,6 +2,8 @@ use crate::Result;
 use serde::{Deserialize, Serialize};
 use std::{fs::File, io::Read, path::Path};
 
+const OLE_CFBF_MAGIC: &[u8; 8] = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Format {
@@ -97,6 +99,7 @@ pub fn detect(path: impl AsRef<Path>) -> Result<Detection> {
 }
 pub fn detect_prefix(bytes: &[u8], extension: &str) -> Detection {
     let hint = Format::from_extension(extension);
+    let ole = bytes.starts_with(OLE_CFBF_MAGIC);
     let signature = if bytes.starts_with(b"%PDF-") {
         Some(Format::Pdf)
     } else if bytes.starts_with(b"{\\rtf") {
@@ -135,6 +138,10 @@ pub fn detect_prefix(bytes: &[u8], extension: &str) -> Detection {
             (hint, DetectionBasis::Extension)
         }
         Some(format) => (format, DetectionBasis::Signature),
+        None if ole && matches!(hint, Format::Doc | Format::Ppt | Format::Xls) => {
+            (hint, DetectionBasis::Extension)
+        }
+        None if ole => (Format::Unknown, DetectionBasis::Unknown),
         None if hint != Format::Unknown => (hint, DetectionBasis::Extension),
         None => (Format::Unknown, DetectionBasis::Unknown),
     };
@@ -142,6 +149,16 @@ pub fn detect_prefix(bytes: &[u8], extension: &str) -> Detection {
     if signature == Some(Format::Zip) && format != Format::Zip {
         warnings
             .push("ZIP document family is extension-hinted; contents were not inspected".into());
+    }
+    if ole && matches!(format, Format::Doc | Format::Ppt | Format::Xls) {
+        warnings.push(
+            "OLE CFBF document family is extension-hinted; streams were not inspected".into(),
+        );
+    }
+    if ole && format == Format::Unknown && hint != Format::Unknown {
+        warnings.push(format!(
+            "OLE CFBF signature conflicts with non-OLE extension hint {hint:?}"
+        ));
     }
     if basis == DetectionBasis::Signature && hint != Format::Unknown && format != hint {
         warnings.push(format!(
@@ -153,5 +170,34 @@ pub fn detect_prefix(bytes: &[u8], extension: &str) -> Detection {
         basis,
         extension_hint: hint,
         warnings,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ole_cfbf_magic_detects_legacy_office_and_rejects_mislabeled_extensions() {
+        let ole = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1rest";
+        for (ext, expected) in [
+            ("doc", Format::Doc),
+            ("ppt", Format::Ppt),
+            ("xls", Format::Xls),
+        ] {
+            let d = detect_prefix(ole, ext);
+            assert_eq!(d.format, expected);
+            assert_eq!(d.basis, DetectionBasis::Extension);
+            assert!(d.warnings.iter().any(|w| w.contains("OLE CFBF")));
+        }
+        let mislabeled = detect_prefix(ole, "txt");
+        assert_eq!(mislabeled.format, Format::Unknown);
+        assert_eq!(mislabeled.basis, DetectionBasis::Unknown);
+        assert!(
+            mislabeled
+                .warnings
+                .iter()
+                .any(|w| w.contains("OLE CFBF signature conflicts"))
+        );
     }
 }
