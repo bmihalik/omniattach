@@ -132,4 +132,20 @@ fn pdf_ocr_option_recognizes_scanned_pages() {
             .any(|w| w.code == "PAGE_WITHOUT_TEXT"),
         "PAGE_WITHOUT_TEXT should be cleared when OCR recognizes text"
     );
+    assert!(
+        bundle
+            .manifest()
+            .warnings
+            .iter()
+            .any(|w| w.code == "OCR_TEXT"),
+        "expected OCR_TEXT warning when OCR recognized text"
+    );
+    assert!(
+        bundle
+            .manifest()
+            .text
+            .iter()
+            .any(|t| t.location["ocr_pages"] == serde_json::json!([1])),
+        "expected ocr_pages [1] in text location"
+    );
 }
