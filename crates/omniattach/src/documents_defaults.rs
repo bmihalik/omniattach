@@ -167,11 +167,25 @@ impl Converter for DocumentConverter {
             omniattach_documents::extract_as(&input.source.name, &bytes, format, &options)
                 .map_err(document_error)?;
         context.check()?;
+        let ocr_pages: Vec<u32> = document
+            .blocks
+            .iter()
+            .filter(|b| b.source.path.as_deref() == Some("ocr"))
+            .filter_map(|b| b.source.page)
+            .collect();
         let mut data = ConversionData::default().payload("omniattach-documents/0.1", &document)?;
         data.text.push(TextFragment {
             text: document.to_text(),
-            location: serde_json::json!({"kind": "document_text"}),
+            location: serde_json::json!({"kind": "document_text", "ocr_pages": ocr_pages}),
         });
+        if !ocr_pages.is_empty() {
+            data.warn(
+                "OCR_TEXT",
+                format!(
+                    "Text on pages {ocr_pages:?} was recognized by local Tesseract OCR and may contain recognition errors"
+                ),
+            );
+        }
         std::fs::write(
             input.output_dir.join("document.json"),
             document.to_json().map_err(document_error)?,
