@@ -49,5 +49,9 @@ fn pdf_pages_without_text_use_ocr_when_supplied() {
 #[test]
 fn pdf_pages_without_text_are_reported_without_ocr() {
     let doc = extract_bytes("a.pdf", &pdf_with_outline(), &Options::default()).unwrap();
-    assert!(doc.diagnostics.iter().any(|d| d.code == "PAGE_WITHOUT_TEXT"));
+    assert!(
+        doc.diagnostics
+            .iter()
+            .any(|d| d.code == "PAGE_WITHOUT_TEXT")
+    );
 }

@@ -61,7 +61,12 @@ pub(crate) fn extract(doc: &mut Document, bytes: &[u8], options: &Options) -> Re
         let images = match pdf.get_page_images(*page_id) {
             Ok(images) => images,
             Err(e) => {
-                skip_image(doc, *page, *page_id, format!("page {page}: image listing failed: {e}"));
+                skip_image(
+                    doc,
+                    *page,
+                    *page_id,
+                    format!("page {page}: image listing failed: {e}"),
+                );
                 continue;
             }
         };
@@ -75,7 +80,10 @@ pub(crate) fn extract(doc: &mut Document, bytes: &[u8], options: &Options) -> Re
     Ok(())
 }
 
-fn dict_of<'a>(pdf: &'a lopdf::Document, object: &'a lopdf::Object) -> Option<&'a lopdf::Dictionary> {
+fn dict_of<'a>(
+    pdf: &'a lopdf::Document,
+    object: &'a lopdf::Object,
+) -> Option<&'a lopdf::Dictionary> {
     match object {
         lopdf::Object::Dictionary(dictionary) => Some(dictionary),
         lopdf::Object::Reference(id) => pdf.get_dictionary(*id).ok(),
@@ -98,7 +106,11 @@ fn decode_pdf_text(bytes: &[u8]) -> String {
 }
 
 /// Bookmarks become headings in outline order, before page text. Named destinations are not resolved.
-fn outline_headings(doc: &mut Document, pdf: &lopdf::Document, pages: &BTreeMap<u32, lopdf::ObjectId>) {
+fn outline_headings(
+    doc: &mut Document,
+    pdf: &lopdf::Document,
+    pages: &BTreeMap<u32, lopdf::ObjectId>,
+) {
     let Ok(root) = pdf.trailer.get(b"Root") else {
         return;
     };
@@ -115,7 +127,15 @@ fn outline_headings(doc: &mut Document, pdf: &lopdf::Document, pages: &BTreeMap<
         pages.iter().map(|(number, id)| (*id, *number)).collect();
     let mut visited = BTreeSet::new();
     let mut count = 0usize;
-    walk_outline(doc, pdf, &page_numbers, Some(first), 1, &mut visited, &mut count);
+    walk_outline(
+        doc,
+        pdf,
+        &page_numbers,
+        Some(first),
+        1,
+        &mut visited,
+        &mut count,
+    );
 }
 
 fn walk_outline<'a>(
@@ -162,7 +182,15 @@ fn walk_outline<'a>(
             doc.title = title_before;
         }
         if let Ok(child) = item.get(b"First") {
-            walk_outline(doc, pdf, page_numbers, Some(child), depth + 1, visited, count);
+            walk_outline(
+                doc,
+                pdf,
+                page_numbers,
+                Some(child),
+                depth + 1,
+                visited,
+                count,
+            );
         }
         current = item.get(b"Next").ok();
     }

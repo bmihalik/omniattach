@@ -754,7 +754,10 @@ pub(crate) fn odf(doc: &mut Document, bytes: &[u8], slides: bool, options: &Opti
                 .and_then(|p| pages.iter().position(|x| *x == p))
                 .map(|n| n as u32 + 1);
         }
-        if let Some(href) = node.attribute((XLINK, "href")).filter(|_| is(node, DRAW, "image")) {
+        if let Some(href) = node
+            .attribute((XLINK, "href"))
+            .filter(|_| is(node, DRAW, "image"))
+        {
             owners
                 .entry(resolve("content.xml", href)?)
                 .or_insert(span.slide);
@@ -925,7 +928,11 @@ pub(crate) fn epub(doc: &mut Document, bytes: &[u8], options: &Options) -> Resul
         crate::html::extract(doc, &html, Some(&member), options)?;
     }
     for item in tree.descendants().filter(|n| is(*n, OPF, "item")) {
-        if !item.attribute("media-type").unwrap_or("").starts_with("image/") {
+        if !item
+            .attribute("media-type")
+            .unwrap_or("")
+            .starts_with("image/")
+        {
             continue;
         }
         let href = item

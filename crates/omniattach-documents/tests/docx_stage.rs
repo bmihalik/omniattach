@@ -34,7 +34,10 @@ fn docx_heading_inherits_level_through_based_on() {
         "a.docx",
         &[("word/document.xml", &body), ("word/styles.xml", &styles)],
     );
-    assert!(matches!(doc.blocks[0].kind, BlockKind::Heading { level: 2 }));
+    assert!(matches!(
+        doc.blocks[0].kind,
+        BlockKind::Heading { level: 2 }
+    ));
     assert_eq!(doc.blocks[0].text, "Inherited");
 }
 
@@ -94,10 +97,19 @@ fn docx_numbered_paragraphs_use_numbering_format() {
     );
     let doc = read(
         "a.docx",
-        &[("word/document.xml", &body), ("word/numbering.xml", &numbering)],
+        &[
+            ("word/document.xml", &body),
+            ("word/numbering.xml", &numbering),
+        ],
     );
-    assert!(matches!(doc.blocks[0].kind, BlockKind::ListItem { ordered: true }));
-    assert!(matches!(doc.blocks[1].kind, BlockKind::ListItem { ordered: false }));
+    assert!(matches!(
+        doc.blocks[0].kind,
+        BlockKind::ListItem { ordered: true }
+    ));
+    assert!(matches!(
+        doc.blocks[1].kind,
+        BlockKind::ListItem { ordered: false }
+    ));
     assert_eq!(doc.blocks[1].source.path.as_deref(), Some("list-level:1"));
 }
 
@@ -120,7 +132,10 @@ fn docx_list_markers_count_and_restart() {
     ));
     let doc = read(
         "a.docx",
-        &[("word/document.xml", &body), ("word/numbering.xml", &numbering)],
+        &[
+            ("word/document.xml", &body),
+            ("word/numbering.xml", &numbering),
+        ],
     );
     let paths: Vec<Option<&str>> = doc
         .blocks

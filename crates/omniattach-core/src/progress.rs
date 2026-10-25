@@ -142,7 +142,10 @@ impl StageReporter {
         self.completed.store(completed, Ordering::Relaxed);
         let total = self.total.load(Ordering::Relaxed);
         let elapsed_ms = self.started.elapsed().as_millis() as u64;
-        let permille = completed.saturating_mul(1000).checked_div(total).unwrap_or(0);
+        let permille = completed
+            .saturating_mul(1000)
+            .checked_div(total)
+            .unwrap_or(0);
         let finished = total > 0 && completed >= total;
 
         let due = finished

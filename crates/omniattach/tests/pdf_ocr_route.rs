@@ -8,11 +8,10 @@ use std::path::PathBuf;
 #[test]
 #[ignore = "needs pdftoppm, tesseract, OMNIATTACH_SCANNED_PDF and OMNIATTACH_EXPECTED_OCR_TEXT"]
 fn pdf_ocr_option_recognizes_scanned_pages() {
-    let pdf = PathBuf::from(
-        std::env::var("OMNIATTACH_SCANNED_PDF").expect("set OMNIATTACH_SCANNED_PDF"),
-    );
-    let expected = std::env::var("OMNIATTACH_EXPECTED_OCR_TEXT")
-        .expect("set OMNIATTACH_EXPECTED_OCR_TEXT");
+    let pdf =
+        PathBuf::from(std::env::var("OMNIATTACH_SCANNED_PDF").expect("set OMNIATTACH_SCANNED_PDF"));
+    let expected =
+        std::env::var("OMNIATTACH_EXPECTED_OCR_TEXT").expect("set OMNIATTACH_EXPECTED_OCR_TEXT");
     let engine = OmniAttach::builder()
         .with_document_defaults()
         .expect("document routes register")

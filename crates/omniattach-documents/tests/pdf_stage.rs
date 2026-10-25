@@ -33,7 +33,10 @@ fn pdf_with_outline() -> Vec<u8> {
 #[test]
 fn pdf_bookmarks_become_headings_with_page_numbers() {
     let doc = extract_bytes("a.pdf", &pdf_with_outline(), &Options::default()).unwrap();
-    assert!(matches!(doc.blocks[0].kind, BlockKind::Heading { level: 1 }));
+    assert!(matches!(
+        doc.blocks[0].kind,
+        BlockKind::Heading { level: 1 }
+    ));
     assert_eq!(doc.blocks[0].text, "Chapter One");
     assert_eq!(doc.blocks[0].source.page, Some(1));
 }

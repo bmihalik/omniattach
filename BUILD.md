@@ -33,14 +33,17 @@ Binaries are written to `target/debug/` or `target/release/`.
 
 ## 4. Testing
 
-...
+OMNIATTACH_SCANNED_PDF=/path/to/scan.pdf OMNIATTACH_EXPECTED_OCR_TEXT=word \
+  cargo test -p omniattach --features workspace --test pdf_ocr_route -- --ignored
+
+cargo test --workspace --all-features
+
 
 ## 5. Formatting
 
 ```bash
 cargo fmt --all                # rewrite files in place
 cargo fmt --all -- --check     # verify only; non-zero exit on differences
-cargo test --workspace --all-features
 ```
 
 Review changes with `git diff` before committing. Rustfmt reads `rustfmt.toml` or `.rustfmt.toml` from the repository (or parent directories); without one it uses defaults. Commit a repository-level `rustfmt.toml` for shared project rules.
