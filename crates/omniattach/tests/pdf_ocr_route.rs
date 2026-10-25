@@ -148,4 +148,14 @@ fn pdf_ocr_option_recognizes_scanned_pages() {
             .any(|t| t.location["ocr_pages"] == serde_json::json!([1])),
         "expected ocr_pages [1] in text location"
     );
+    let ocr_payload = bundle
+        .payload("omniattach-backends/pdf-ocr/0.1")
+        .expect("expected omniattach-backends/pdf-ocr/0.1 payload");
+    let words = ocr_payload["words"]
+        .as_array()
+        .expect("words array in pdf-ocr payload");
+    assert!(!words.is_empty(), "expected non-empty OCR word units");
+    assert_eq!(words[0]["location"]["page"], 1);
+    assert!(words[0]["location"]["bbox"]["width"].as_u64().unwrap_or(0) > 0);
+    assert!(words[0]["confidence"].as_f64().is_some());
 }

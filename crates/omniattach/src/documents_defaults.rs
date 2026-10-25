@@ -126,19 +126,30 @@ impl Converter for DocumentConverter {
             ));
         }
         #[cfg(feature = "backends")]
+        let ocr_words: std::sync::Arc<std::sync::Mutex<Vec<omniattach_backends::TextUnit>>> =
+            std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        #[cfg(feature = "backends")]
         let pdf_ocr = if ocr.enabled {
             let path = input.path.clone();
-            let language = ocr.language;
+            let language = ocr.language.clone();
             let dpi = ocr.dpi;
+            let words_out = ocr_words.clone();
             Some(omniattach_documents::PdfOcr(std::sync::Arc::new(
                 move |page: u32| -> omniattach_documents::Result<String> {
                     let runner = omniattach_backends::ProcessRunner;
                     let ctx = omniattach_backends::BackendContext::new(&runner);
-                    omniattach_backends::PdfPageOcr::default()
+                    let units = omniattach_backends::PdfPageOcr::default()
                         .with_language(language.clone())
                         .with_dpi(dpi)
-                        .recognize_page(&path, page, &ctx)
-                        .map_err(|e| omniattach_documents::Error::Parse(format!("OCR: {e}")))
+                        .recognize_page_words(&path, page, &ctx)
+                        .map_err(|e| omniattach_documents::Error::Parse(format!("OCR: {e}")))?;
+                    let text = units
+                        .iter()
+                        .map(|w| w.text.as_str())
+                        .collect::<Vec<_>>()
+                        .join(" ");
+                    words_out.lock().expect("ocr words lock").extend(units);
+                    Ok(text)
                 },
             )))
         } else {
@@ -174,6 +185,20 @@ impl Converter for DocumentConverter {
             .filter_map(|b| b.source.page)
             .collect();
         let mut data = ConversionData::default().payload("omniattach-documents/0.1", &document)?;
+        #[cfg(feature = "backends")]
+        if !ocr_pages.is_empty() {
+            let collected = ocr_words.lock().expect("ocr words lock").clone();
+            data = data.payload(
+                "omniattach-backends/pdf-ocr/0.1",
+                serde_json::json!({
+                    "language": ocr.language,
+                    "dpi": ocr.dpi,
+                    "confidence_scale": "tesseract_native_0_100",
+                    "coordinates": "rasterized_page_pixels",
+                    "words": collected,
+                }),
+            )?;
+        }
         data.text.push(TextFragment {
             text: document.to_text(),
             location: serde_json::json!({"kind": "document_text", "ocr_pages": ocr_pages}),
