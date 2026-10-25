@@ -29,17 +29,76 @@ fn document_format(format: Format) -> Option<DocFormat> {
     })
 }
 
-/// Accepts only `{}`, `null`, or `{"ocr": true|false}`. OCR is off unless requested.
-fn parse_ocr_option(options: &serde_json::Value) -> Result<bool> {
+struct OcrConfig {
+    enabled: bool,
+    language: String,
+    dpi: u32,
+}
+
+/// Accepts `{}`, `null`, or `{"ocr": bool, "ocr_language": "eng", "ocr_dpi": 300}`.
+fn parse_ocr_options(options: &serde_json::Value) -> Result<OcrConfig> {
+    let mut cfg = OcrConfig {
+        enabled: false,
+        language: "eng".into(),
+        dpi: 300,
+    };
+    let mut language_or_dpi_set = false;
     match options {
-        serde_json::Value::Null => Ok(false),
-        serde_json::Value::Object(map) if map.keys().all(|k| k == "ocr") => match map.get("ocr") {
-            None => Ok(false),
-            Some(serde_json::Value::Bool(enabled)) => Ok(*enabled),
-            Some(_) => Err(Error::Configuration("ocr option must be a boolean".into())),
-        },
+        serde_json::Value::Null => Ok(cfg),
+        serde_json::Value::Object(map) => {
+            for (key, value) in map {
+                match key.as_str() {
+                    "ocr" => {
+                        cfg.enabled = value.as_bool().ok_or_else(|| {
+                            Error::Configuration("ocr option must be a boolean".into())
+                        })?;
+                    }
+                    "ocr_language" => {
+                        let lang = value.as_str().ok_or_else(|| {
+                            Error::Configuration("ocr_language option must be a string".into())
+                        })?;
+                        if lang.trim().is_empty()
+                            || !lang
+                                .bytes()
+                                .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'+')
+                        {
+                            return Err(Error::Configuration(
+                                "ocr_language must be a nonempty ASCII Tesseract language code"
+                                    .into(),
+                            ));
+                        }
+                        cfg.language = lang.into();
+                        language_or_dpi_set = true;
+                    }
+                    "ocr_dpi" => {
+                        let dpi = value
+                            .as_u64()
+                            .and_then(|n| u32::try_from(n).ok())
+                            .filter(|d| (72..=1200).contains(d))
+                            .ok_or_else(|| {
+                                Error::Configuration(
+                                    "ocr_dpi option must be an integer in 72..=1200".into(),
+                                )
+                            })?;
+                        cfg.dpi = dpi;
+                        language_or_dpi_set = true;
+                    }
+                    _ => {
+                        return Err(Error::Configuration(
+                            "document routes accept only ocr, ocr_language and ocr_dpi options in 0.2.0; call omniattach-documents directly for mappings".into(),
+                        ));
+                    }
+                }
+            }
+            if language_or_dpi_set && !cfg.enabled {
+                return Err(Error::Configuration(
+                    "ocr_language and ocr_dpi require ocr: true".into(),
+                ));
+            }
+            Ok(cfg)
+        }
         _ => Err(Error::Configuration(
-            "document routes accept only the ocr boolean option in 0.2.0; call omniattach-documents directly for mappings".into(),
+            "document routes accept only an options object in 0.2.0".into(),
         )),
     }
 }
@@ -52,7 +111,7 @@ impl Converter for DocumentConverter {
         context: &JobContext,
     ) -> Result<ConversionData> {
         context.check()?;
-        let ocr = parse_ocr_option(&request.options)?;
+        let ocr = parse_ocr_options(&request.options)?;
         if input.format == Format::Xml {
             return Err(Error::Configuration(
                 "XML needs an explicit column mapping; records are not guessed. Use omniattach-documents::extract_xml_table".into(),
@@ -61,19 +120,23 @@ impl Converter for DocumentConverter {
         let format = document_format(input.format).ok_or_else(|| {
             Error::Configuration(format!("no document adapter for {:?}", input.format))
         })?;
-        if ocr && format != DocFormat::Pdf {
+        if ocr.enabled && format != DocFormat::Pdf {
             return Err(Error::Configuration(
                 "ocr option applies only to PDF documents".into(),
             ));
         }
         #[cfg(feature = "backends")]
-        let pdf_ocr = if ocr {
+        let pdf_ocr = if ocr.enabled {
             let path = input.path.clone();
+            let language = ocr.language;
+            let dpi = ocr.dpi;
             Some(omniattach_documents::PdfOcr(std::sync::Arc::new(
                 move |page: u32| -> omniattach_documents::Result<String> {
                     let runner = omniattach_backends::ProcessRunner;
                     let ctx = omniattach_backends::BackendContext::new(&runner);
                     omniattach_backends::PdfPageOcr::default()
+                        .with_language(language.clone())
+                        .with_dpi(dpi)
                         .recognize_page(&path, page, &ctx)
                         .map_err(|e| omniattach_documents::Error::Parse(format!("OCR: {e}")))
                 },
@@ -82,7 +145,7 @@ impl Converter for DocumentConverter {
             None
         };
         #[cfg(not(feature = "backends"))]
-        let pdf_ocr = if ocr {
+        let pdf_ocr = if ocr.enabled {
             return Err(Error::Configuration(
                 "ocr option requires the backends feature".into(),
             ));

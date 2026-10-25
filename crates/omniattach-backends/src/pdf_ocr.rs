@@ -20,6 +20,16 @@ impl Default for PdfPageOcr {
 }
 
 impl PdfPageOcr {
+    pub fn with_language(mut self, language: impl Into<String>) -> Self {
+        self.language = language.into();
+        self
+    }
+
+    pub fn with_dpi(mut self, dpi: u32) -> Self {
+        self.dpi = dpi;
+        self
+    }
+
     /// Renders one PDF page (one-based) and returns recognized plain text. Empty text means no words were found.
     pub fn recognize_page(
         &self,
@@ -27,6 +37,16 @@ impl PdfPageOcr {
         page: u32,
         ctx: &BackendContext<'_>,
     ) -> Result<String> {
+        if !(72..=1200).contains(&self.dpi) {
+            return Err(Error::Configuration(
+                "PDF OCR DPI must be in 72..=1200".into(),
+            ));
+        }
+        if self.language.trim().is_empty() {
+            return Err(Error::Configuration(
+                "PDF OCR language must be nonempty".into(),
+            ));
+        }
         let scratch = tempfile::tempdir()?;
         let prefix = scratch.path().join("page");
         let render = self
@@ -111,15 +131,39 @@ mod tests {
         };
         let ctx = BackendContext::new(&runner);
         let text = PdfPageOcr::default()
+            .with_language("hun+eng")
+            .with_dpi(200)
             .recognize_page(&PathBuf::from("scan.pdf"), 3, &ctx)
             .unwrap();
         assert_eq!(text, "Scanned words");
         let calls = runner.calls.lock().unwrap();
         assert_eq!(calls.len(), 2);
         assert_eq!(calls[0][0], "pdftoppm");
+        assert!(calls[0].windows(2).any(|w| w == ["-r", "200"]));
         assert!(calls[0].windows(2).any(|w| w == ["-f", "3"]));
         assert!(calls[0].windows(2).any(|w| w == ["-l", "3"]));
         assert_eq!(calls[1][0], "tesseract");
         assert!(calls[1].contains(&"stdout".to_string()));
+        assert!(calls[1].windows(2).any(|w| w == ["-l", "hun+eng"]));
+    }
+
+    #[test]
+    fn rejects_invalid_dpi_or_empty_language() {
+        let runner = FakeRunner {
+            calls: std::sync::Mutex::new(Vec::new()),
+        };
+        let ctx = BackendContext::new(&runner);
+        assert!(
+            PdfPageOcr::default()
+                .with_dpi(10)
+                .recognize_page(&PathBuf::from("scan.pdf"), 1, &ctx)
+                .is_err()
+        );
+        assert!(
+            PdfPageOcr::default()
+                .with_language("  ")
+                .recognize_page(&PathBuf::from("scan.pdf"), 1, &ctx)
+                .is_err()
+        );
     }
 }

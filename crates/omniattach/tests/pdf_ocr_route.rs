@@ -1,5 +1,5 @@
 #![cfg(all(feature = "documents", feature = "backends"))]
-use omniattach::{ConversionRequest, FacadeContext, Goal, OmniAttach};
+use omniattach::{ConversionRequest, Error, FacadeContext, Goal, OmniAttach};
 use std::path::PathBuf;
 
 fn blank_pdf() -> Vec<u8> {
@@ -52,6 +52,35 @@ fn pdf_without_ocr_option_yields_no_text_and_page_without_text_warning() {
     );
 }
 
+#[test]
+fn pdf_ocr_validates_language_and_dpi_options() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let pdf = dir.path().join("scan.pdf");
+    std::fs::write(&pdf, blank_pdf()).expect("write blank pdf");
+    let engine = OmniAttach::builder()
+        .with_document_defaults()
+        .expect("document routes register")
+        .build();
+    for bad in [
+        serde_json::json!({"ocr_dpi": 200}),
+        serde_json::json!({"ocr": true, "ocr_dpi": 10}),
+        serde_json::json!({"ocr": true, "ocr_dpi": 5000}),
+        serde_json::json!({"ocr": true, "ocr_language": ""}),
+        serde_json::json!({"ocr": true, "ocr_language": "eng;rm"}),
+    ] {
+        let req = ConversionRequest::new(&pdf, Goal::Extract)
+            .with_route("documents")
+            .with_options(bad.clone());
+        assert!(
+            matches!(
+                engine.convert(&req, &FacadeContext::default()),
+                Err(Error::Configuration(_))
+            ),
+            "expected Configuration error for {bad}"
+        );
+    }
+}
+
 /// Needs pdftoppm and tesseract on PATH and an image-only PDF.
 /// Run: OMNIATTACH_SCANNED_PDF=/path/scan.pdf OMNIATTACH_EXPECTED_OCR_TEXT=word \
 ///   cargo test -p omniattach --features workspace --test pdf_ocr_route -- --ignored
@@ -86,7 +115,9 @@ fn pdf_ocr_option_recognizes_scanned_pages() {
 
     let request = ConversionRequest::new(pdf, Goal::Extract)
         .with_route("documents")
-        .with_options(serde_json::json!({"ocr": true}));
+        .with_options(
+            serde_json::json!({"ocr": true, "ocr_language": "eng", "ocr_dpi": 300}),
+        );
     let bundle = engine
         .convert(&request, &FacadeContext::default())
         .expect("OCR conversion succeeds");
