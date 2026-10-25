@@ -126,8 +126,9 @@ impl Converter for DocumentConverter {
             ));
         }
         #[cfg(feature = "backends")]
-        let ocr_words: std::sync::Arc<std::sync::Mutex<Vec<omniattach_backends::TextUnit>>> =
-            std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let ocr_words: std::sync::Arc<
+            std::sync::Mutex<Vec<omniattach_backends::TextUnit>>,
+        > = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         #[cfg(feature = "backends")]
         let pdf_ocr = if ocr.enabled {
             let path = input.path.clone();
