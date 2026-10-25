@@ -36,17 +36,26 @@ pub(crate) fn extract(doc: &mut Document, bytes: &[u8], options: &Options) -> Re
         if !text.trim().is_empty() {
             doc.paragraph(BlockKind::Paragraph, text.trim_end().into(), span);
         } else if let Some(ocr) = &options.pdf_ocr {
-            let recognized = (ocr.0)(*page)?;
-            if recognized.trim().is_empty() {
-                doc.diagnostics.push(Diagnostic {
-                    code: "PAGE_WITHOUT_TEXT".into(),
-                    message: format!("Page {page} has no text after OCR"),
-                    source: Some(span),
-                });
-            } else {
-                let mut span = span;
-                span.path = Some("ocr".into());
-                doc.paragraph(BlockKind::Paragraph, recognized.trim_end().into(), span);
+            match (ocr.0)(*page) {
+                Ok(recognized) if !recognized.trim().is_empty() => {
+                    let mut span = span;
+                    span.path = Some("ocr".into());
+                    doc.paragraph(BlockKind::Paragraph, recognized.trim_end().into(), span);
+                }
+                Ok(_) => {
+                    doc.diagnostics.push(Diagnostic {
+                        code: "PAGE_WITHOUT_TEXT".into(),
+                        message: format!("Page {page} has no text after OCR"),
+                        source: Some(span),
+                    });
+                }
+                Err(e) => {
+                    doc.diagnostics.push(Diagnostic {
+                        code: "PDF_PAGE_OCR_FAILED".into(),
+                        message: format!("Page {page} OCR failed: {e}"),
+                        source: Some(span),
+                    });
+                }
             }
         } else {
             doc.diagnostics.push(Diagnostic {
