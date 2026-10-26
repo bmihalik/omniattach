@@ -190,6 +190,11 @@ impl OmniAttachBuilder {
     /// Legacy Office extraction: LibreOffice converts to OOXML, then omniattach-documents extracts it.
     /// Registration does not probe LibreOffice.
     pub fn with_legacy_office_pipelines(self) -> Result<Self> {
+        self.with_legacy_office_pipelines_runner(Arc::new(omniattach_backends::ProcessRunner))
+    }
+
+    /// Registers legacy Office extraction pipelines with an injected [`Runner`].
+    pub fn with_legacy_office_pipelines_runner(self, runner: Arc<dyn Runner>) -> Result<Self> {
         use omniattach_backends::{LibreOffice, OfficeFormat};
         let goals = vec![Goal::Extract, Goal::Markdown, Goal::Tables];
         let b = self.register(
@@ -201,7 +206,8 @@ impl OmniAttachBuilder {
             )
             .described("LibreOffice .doc/.rtf to DOCX, then omniattach-documents"),
             ArtifactPipeline::new(
-                ExternalAdapter::new(LibreOffice::new(OfficeFormat::Docx)),
+                ExternalAdapter::new(LibreOffice::new(OfficeFormat::Docx))
+                    .with_runner(runner.clone()),
                 crate::documents_defaults::DocumentConverter,
                 Goal::Normalize,
                 Format::Docx,
@@ -216,7 +222,7 @@ impl OmniAttachBuilder {
             )
             .described("LibreOffice .ppt to PPTX, then omniattach-documents"),
             ArtifactPipeline::new(
-                ExternalAdapter::new(LibreOffice::new(OfficeFormat::Pptx)),
+                ExternalAdapter::new(LibreOffice::new(OfficeFormat::Pptx)).with_runner(runner),
                 crate::documents_defaults::DocumentConverter,
                 Goal::Normalize,
                 Format::Pptx,
