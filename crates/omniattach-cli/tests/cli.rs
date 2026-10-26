@@ -93,7 +93,7 @@ fn help_is_human_readable_and_successful() {
 fn version_is_successful() {
     let o = run(&["--version"]);
     assert!(o.status.success());
-    assert!(String::from_utf8(o.stdout).unwrap().contains("0.1.0"));
+    assert!(String::from_utf8(o.stdout).unwrap().contains("0.2.0"));
 }
 #[test]
 fn parser_errors_are_json_on_stderr_only() {
