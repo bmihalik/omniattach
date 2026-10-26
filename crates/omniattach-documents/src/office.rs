@@ -27,7 +27,7 @@ fn ancestor(node: Node<'_, '_>, uri: &str, name: &str) -> bool {
 }
 fn run_text(node: Node<'_, '_>, uri: &str) -> String {
     let mut out = String::new();
-    for n in node.descendants().filter(|n| n.is_element()) {
+    for n in node.descendants().filter(|n| n.is_element() && !in_move_from(*n, node)) {
         if is(n, uri, "t") {
             out.push_str(&xml::text(n));
         } else if is(n, uri, "tab") {
@@ -44,12 +44,18 @@ fn in_textbox_below(n: Node<'_, '_>, top: Node<'_, '_>) -> bool {
         .take_while(|a| *a != top)
         .any(|a| is(a, W, "txbxContent"))
 }
+/// True when `n` sits inside a tracked move-from region that is itself inside `top`.
+fn in_move_from(n: Node<'_, '_>, top: Node<'_, '_>) -> bool {
+    n.ancestors()
+    .take_while(|a| *a != top)
+    .any(|a| is(a, W, "moveFrom"))
+}
 /// Like run_text, but skips text that belongs to text boxes inside `top`.
 fn run_text_outside_textboxes(top: Node<'_, '_>, uri: &str) -> String {
     let mut out = String::new();
     for n in top
         .descendants()
-        .filter(|n| n.is_element() && !in_textbox_below(*n, top))
+        .filter(|n| n.is_element() && !in_textbox_below(*n, top) && !in_move_from(*n, top))
     {
         if is(n, uri, "t") {
             out.push_str(&xml::text(n));
@@ -497,7 +503,7 @@ pub(crate) fn docx(doc: &mut Document, bytes: &[u8], options: &Options) -> Resul
     // Current counter per (numId, level), advanced in document order.
     let mut counters: BTreeMap<(String, u8), u32> = BTreeMap::new();
     for node in tree.descendants().filter(|n| n.is_element()) {
-        if is(node, W, "tbl") && !ancestor(node, W, "tbl") {
+       if is(node, W, "tbl") && !ancestor(node, W, "tbl") && !ancestor(node, W, "moveFrom") {
             let mut rows = Vec::new();
             for (ri, row) in node.children().filter(|n| is(*n, W, "tr")).enumerate() {
                 let mut values = Vec::new();
@@ -527,7 +533,11 @@ pub(crate) fn docx(doc: &mut Document, bytes: &[u8], options: &Options) -> Resul
                 options,
             )?);
         }
-        if !is(node, W, "p") || ancestor(node, W, "tbl") || ancestor(node, W, "txbxContent") {
+        if !is(node, W, "p")
+            || ancestor(node, W, "tbl")
+            || ancestor(node, W, "txbxContent")
+            || ancestor(node, W, "moveFrom")
+        {
             continue;
         }
         let value = run_text_outside_textboxes(node, W);
