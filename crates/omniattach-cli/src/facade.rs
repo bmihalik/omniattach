@@ -23,6 +23,10 @@ impl FacadeEngine {
             #[cfg(feature = "backends")]
             {
                 builder = builder.with_external_defaults().map_err(map_error)?;
+                #[cfg(feature = "documents")]
+                {
+                    builder = builder.with_legacy_office_pipelines().map_err(map_error)?;
+                }
                 if let Some(model) = &config.whisper_model {
                     builder = builder
                         .with_whisper_cpp(model, &config.language)
