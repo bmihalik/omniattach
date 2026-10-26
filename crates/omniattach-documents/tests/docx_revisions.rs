@@ -7,8 +7,11 @@ const DOC_NS: &str = "http://schemas.openxmlformats.org/wordprocessingml/2006/ma
 fn docx_body(body: &str) -> Vec<u8> {
     let xml = format!(r#"<w:document xmlns:w="{DOC_NS}"><w:body>{body}</w:body></w:document>"#);
     let mut zip = zip::ZipWriter::new(Cursor::new(Vec::new()));
-    zip.start_file("word/document.xml", zip::write::SimpleFileOptions::default())
-        .unwrap();
+    zip.start_file(
+        "word/document.xml",
+        zip::write::SimpleFileOptions::default(),
+    )
+    .unwrap();
     zip.write_all(xml.as_bytes()).unwrap();
     zip.finish().unwrap().into_inner()
 }
