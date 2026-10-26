@@ -2,7 +2,24 @@
 use crate::*;
 use omniattach_documents::{Format as DocFormat, Limits, Options};
 
-pub(crate) struct DocumentConverter;
+pub(crate) struct DocumentConverter {
+    #[cfg(feature = "backends")]
+    runner: std::sync::Arc<dyn omniattach_backends::Runner>,
+}
+
+impl DocumentConverter {
+    pub(crate) fn new() -> Self {
+        Self {
+            #[cfg(feature = "backends")]
+            runner: std::sync::Arc::new(omniattach_backends::ProcessRunner),
+        }
+    }
+
+    #[cfg(feature = "backends")]
+    pub(crate) fn with_runner(runner: std::sync::Arc<dyn omniattach_backends::Runner>) -> Self {
+        Self { runner }
+    }
+}
 
 fn document_error(error: impl std::fmt::Display) -> Error {
     Error::Converter {
@@ -135,10 +152,10 @@ impl Converter for DocumentConverter {
             let language = ocr.language.clone();
             let dpi = ocr.dpi;
             let words_out = ocr_words.clone();
+            let runner = self.runner.clone();
             Some(omniattach_documents::PdfOcr(std::sync::Arc::new(
                 move |page: u32| -> omniattach_documents::Result<String> {
-                    let runner = omniattach_backends::ProcessRunner;
-                    let ctx = omniattach_backends::BackendContext::new(&runner);
+                    let ctx = omniattach_backends::BackendContext::new(runner.as_ref());
                     let units = omniattach_backends::PdfPageOcr::default()
                         .with_language(language.clone())
                         .with_dpi(dpi)
@@ -251,6 +268,19 @@ impl Converter for DocumentConverter {
 impl OmniAttachBuilder {
     /// Registers omniattach-documents routes. XML is accepted only to fail with a mapping error.
     pub fn with_document_defaults(self) -> Result<Self> {
+        self.with_document_converter(DocumentConverter::new())
+    }
+
+    /// Same as [`with_document_defaults`](Self::with_document_defaults), but OCR subprocesses run through `runner`.
+    #[cfg(feature = "backends")]
+    pub fn with_document_defaults_runner(
+        self,
+        runner: std::sync::Arc<dyn omniattach_backends::Runner>,
+    ) -> Result<Self> {
+        self.with_document_converter(DocumentConverter::with_runner(runner))
+    }
+
+    fn with_document_converter(self, converter: DocumentConverter) -> Result<Self> {
         self.register(
             Route::new(
                 "documents",
@@ -274,7 +304,7 @@ impl OmniAttachBuilder {
                 ExecutionKind::InProcess,
             )
             .described("omniattach-documents: Office, ODF, EPUB, PDF, HTML, CSV, JSON; XML needs a mapping"),
-            DocumentConverter,
+            converter,
         )
     }
 }

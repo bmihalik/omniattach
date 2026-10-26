@@ -208,7 +208,7 @@ impl OmniAttachBuilder {
             ArtifactPipeline::new(
                 ExternalAdapter::new(LibreOffice::new(OfficeFormat::Docx))
                     .with_runner(runner.clone()),
-                crate::documents_defaults::DocumentConverter,
+                crate::documents_defaults::DocumentConverter::new(),
                 Goal::Normalize,
                 Format::Docx,
             ),
@@ -223,7 +223,7 @@ impl OmniAttachBuilder {
             .described("LibreOffice .ppt to PPTX, then omniattach-documents"),
             ArtifactPipeline::new(
                 ExternalAdapter::new(LibreOffice::new(OfficeFormat::Pptx)).with_runner(runner),
-                crate::documents_defaults::DocumentConverter,
+                crate::documents_defaults::DocumentConverter::new(),
                 Goal::Normalize,
                 Format::Pptx,
             ),

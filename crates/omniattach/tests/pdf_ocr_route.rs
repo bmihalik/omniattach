@@ -1,6 +1,6 @@
 #![cfg(all(feature = "documents", feature = "backends"))]
 use omniattach::{ConversionRequest, Error, FacadeContext, Goal, OmniAttach};
-use std::path::PathBuf;
+use std::{path::PathBuf, sync::Arc, time::Duration};
 
 fn blank_pdf() -> Vec<u8> {
     let objects = [
@@ -29,6 +29,39 @@ fn blank_pdf() -> Vec<u8> {
     out
 }
 
+const FAKE_TSV: &str = "level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\tleft\ttop\twidth\theight\tconf\ttext\n\
+5\t1\t1\t1\t1\t1\t10\t20\t30\t40\t95.5\tScanned\n\
+5\t1\t1\t1\t1\t2\t50\t20\t35\t40\t92.0\twords\n";
+
+struct FakeOcrRunner;
+impl omniattach::backends::Runner for FakeOcrRunner {
+    fn run(
+        &self,
+        spec: &omniattach::backends::CommandSpec,
+        _: &omniattach::backends::RunOptions,
+    ) -> omniattach::backends::Result<omniattach::backends::ProcessOutput> {
+        let program = spec
+            .program
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .into_owned();
+        let stdout = match program.as_str() {
+            "pdftoppm" => {
+                std::fs::write(spec.cwd.join("page.png"), b"png")?;
+                Vec::new()
+            }
+            "tesseract" => FAKE_TSV.as_bytes().to_vec(),
+            other => panic!("unexpected program {other}"),
+        };
+        Ok(omniattach::backends::ProcessOutput {
+            stdout,
+            stderr: Vec::new(),
+            elapsed: Duration::ZERO,
+        })
+    }
+}
+
 #[test]
 fn pdf_without_ocr_option_yields_no_text_and_page_without_text_warning() {
     let dir = tempfile::tempdir().expect("tempdir");
@@ -50,6 +83,53 @@ fn pdf_without_ocr_option_yields_no_text_and_page_without_text_warning() {
             .iter()
             .any(|w| w.code == "PAGE_WITHOUT_TEXT")
     );
+}
+
+#[test]
+fn pdf_ocr_route_with_fake_runner_recognizes_words_without_tools() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let pdf = dir.path().join("scan.pdf");
+    std::fs::write(&pdf, blank_pdf()).expect("write blank pdf");
+    let engine = OmniAttach::builder()
+        .with_document_defaults_runner(Arc::new(FakeOcrRunner))
+        .expect("document routes register")
+        .build();
+    let request = ConversionRequest::new(&pdf, Goal::Extract)
+        .with_route("documents")
+        .with_options(serde_json::json!({"ocr": true}));
+    let bundle = engine
+        .convert(&request, &FacadeContext::default())
+        .expect("fake OCR conversion succeeds");
+    assert!(bundle.plain_text().contains("Scanned words"));
+    assert!(
+        bundle
+            .manifest()
+            .warnings
+            .iter()
+            .any(|w| w.code == "OCR_TEXT")
+    );
+    assert!(
+        !bundle
+            .manifest()
+            .warnings
+            .iter()
+            .any(|w| w.code == "PAGE_WITHOUT_TEXT")
+    );
+    assert!(
+        bundle
+            .manifest()
+            .text
+            .iter()
+            .any(|t| t.location["ocr_pages"] == serde_json::json!([1]))
+    );
+    let payload = bundle
+        .payload("omniattach-backends/pdf-ocr/0.1")
+        .expect("pdf-ocr payload");
+    let words = payload["words"].as_array().expect("words array");
+    assert_eq!(words.len(), 2);
+    assert_eq!(words[0]["location"]["page"], 1);
+    assert_eq!(words[0]["location"]["bbox"]["width"], 30);
+    assert_eq!(words[0]["confidence"], 95.5);
 }
 
 #[test]
