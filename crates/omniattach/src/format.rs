@@ -163,7 +163,10 @@ pub fn detect_prefix(bytes: &[u8], extension: &str) -> Detection {
             (hint, DetectionBasis::Extension)
         }
         Some(format) => (format, DetectionBasis::Signature),
-        None if ole && legacy_stream.is_some() => (legacy_stream.unwrap_or(Format::Unknown), DetectionBasis::Signature),
+        None if ole && legacy_stream.is_some() => (
+            legacy_stream.unwrap_or(Format::Unknown),
+            DetectionBasis::Signature,
+        ),
         None if ole && matches!(hint, Format::Doc | Format::Ppt | Format::Xls) => {
             (hint, DetectionBasis::Extension)
         }
@@ -176,7 +179,10 @@ pub fn detect_prefix(bytes: &[u8], extension: &str) -> Detection {
         warnings
             .push("ZIP document family is extension-hinted; contents were not inspected".into());
     }
-    if ole && basis == DetectionBasis::Extension && matches!(format, Format::Doc | Format::Ppt | Format::Xls) {
+    if ole
+        && basis == DetectionBasis::Extension
+        && matches!(format, Format::Doc | Format::Ppt | Format::Xls)
+    {
         warnings.push(
             "OLE CFBF document family is extension-hinted; no stream marker found in the inspected prefix".into(),
         );
@@ -230,10 +236,18 @@ mod tests {
     #[test]
     fn cfbf_stream_names_override_a_wrong_extension() {
         let mut bytes = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1".to_vec();
-        bytes.extend("PowerPoint Document".encode_utf16().flat_map(u16::to_le_bytes));
+        bytes.extend(
+            "PowerPoint Document"
+                .encode_utf16()
+                .flat_map(u16::to_le_bytes),
+        );
         let d = detect_prefix(&bytes, "doc");
         assert_eq!(d.format, Format::Ppt);
         assert_eq!(d.basis, DetectionBasis::Signature);
-        assert!(d.warnings.iter().any(|w| w.contains("differs from extension hint")));
+        assert!(
+            d.warnings
+                .iter()
+                .any(|w| w.contains("differs from extension hint"))
+        );
     }
 }
