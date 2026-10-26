@@ -4,6 +4,13 @@ use std::{fs::File, io::Read, path::Path};
 
 const OLE_CFBF_MAGIC: &[u8; 8] = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1";
 
+/// CFBF stream names that identify the legacy Office family. Names are UTF-16LE in directory entries.
+const CFBF_STREAMS: [(&str, Format); 3] = [
+    ("WordDocument", Format::Doc),
+    ("PowerPoint Document", Format::Ppt),
+    ("Workbook", Format::Xls),
+];
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Format {
@@ -97,6 +104,23 @@ pub fn detect(path: impl AsRef<Path>) -> Result<Detection> {
         path.extension().and_then(|v| v.to_str()).unwrap_or(""),
     ))
 }
+
+/// Legacy family named by a CFBF stream marker in the prefix; `None` if absent or ambiguous.
+fn cfbf_stream_format(bytes: &[u8]) -> Option<Format> {
+    let found: Vec<Format> = CFBF_STREAMS
+        .iter()
+        .filter(|(name, _)| {
+            let needle: Vec<u8> = name.encode_utf16().flat_map(u16::to_le_bytes).collect();
+            bytes.windows(needle.len()).any(|w| w == needle.as_slice())
+        })
+        .map(|(_, format)| *format)
+        .collect();
+    match found.as_slice() {
+        [only] => Some(*only),
+        _ => None,
+    }
+}
+
 pub fn detect_prefix(bytes: &[u8], extension: &str) -> Detection {
     let hint = Format::from_extension(extension);
     let ole = bytes.starts_with(OLE_CFBF_MAGIC);
@@ -122,6 +146,7 @@ pub fn detect_prefix(bytes: &[u8], extension: &str) -> Detection {
     } else {
         None
     };
+    let legacy_stream = if ole { cfbf_stream_format(bytes) } else { None };
     let (format, basis) = match signature {
         Some(Format::Zip)
             if matches!(
@@ -138,6 +163,7 @@ pub fn detect_prefix(bytes: &[u8], extension: &str) -> Detection {
             (hint, DetectionBasis::Extension)
         }
         Some(format) => (format, DetectionBasis::Signature),
+        None if ole && legacy_stream.is_some() => (legacy_stream.unwrap_or(Format::Unknown), DetectionBasis::Signature),
         None if ole && matches!(hint, Format::Doc | Format::Ppt | Format::Xls) => {
             (hint, DetectionBasis::Extension)
         }
@@ -150,9 +176,9 @@ pub fn detect_prefix(bytes: &[u8], extension: &str) -> Detection {
         warnings
             .push("ZIP document family is extension-hinted; contents were not inspected".into());
     }
-    if ole && matches!(format, Format::Doc | Format::Ppt | Format::Xls) {
+    if ole && basis == DetectionBasis::Extension && matches!(format, Format::Doc | Format::Ppt | Format::Xls) {
         warnings.push(
-            "OLE CFBF document family is extension-hinted; streams were not inspected".into(),
+            "OLE CFBF document family is extension-hinted; no stream marker found in the inspected prefix".into(),
         );
     }
     if ole && format == Format::Unknown && hint != Format::Unknown {
@@ -199,5 +225,15 @@ mod tests {
                 .iter()
                 .any(|w| w.contains("OLE CFBF signature conflicts"))
         );
+    }
+
+    #[test]
+    fn cfbf_stream_names_override_a_wrong_extension() {
+        let mut bytes = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1".to_vec();
+        bytes.extend("PowerPoint Document".encode_utf16().flat_map(u16::to_le_bytes));
+        let d = detect_prefix(&bytes, "doc");
+        assert_eq!(d.format, Format::Ppt);
+        assert_eq!(d.basis, DetectionBasis::Signature);
+        assert!(d.warnings.iter().any(|w| w.contains("differs from extension hint")));
     }
 }
