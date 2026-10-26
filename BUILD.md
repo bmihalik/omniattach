@@ -26,7 +26,7 @@ External tools are needed only at runtime, not to compile. Missing tools cause n
 ```bash
 git clone https://github.com/bmihalik/omniattach.git   # first time
 cd omniattach
-git pull --ff-only origin master                       # existing checkout
+git pull --ff-only origin main                         # existing checkout
 ```
 
 `--ff-only` avoids accidental merge commits.
