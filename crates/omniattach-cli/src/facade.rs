@@ -5,9 +5,13 @@ use omniattach::{ConversionRequest, FacadeContext, Format, Goal, NdjsonProgress,
 use serde_json::{Value, json};
 use std::{path::Path, time::Duration};
 
+/// Route IDs that require a working LibreOffice install.
+const LEGACY_ROUTES: [&str; 2] = ["legacy-doc-rtf", "legacy-ppt"];
+
 pub struct FacadeEngine {
     engine: OmniAttach,
     base_context: FacadeContext,
+    legacy_routes: bool,
 }
 impl FacadeEngine {
     pub fn new(config: &EngineConfig) -> Result<Self> {
@@ -19,6 +23,8 @@ impl FacadeEngine {
         {
             builder = builder.with_document_defaults().map_err(map_error)?;
         }
+        #[allow(unused_mut)]
+        let mut legacy_routes = false;
         if config.external_backends {
             #[cfg(feature = "backends")]
             {
@@ -26,6 +32,7 @@ impl FacadeEngine {
                 #[cfg(feature = "documents")]
                 {
                     builder = builder.with_legacy_office_pipelines().map_err(map_error)?;
+                    legacy_routes = true;
                 }
                 if let Some(model) = &config.whisper_model {
                     builder = builder
@@ -43,6 +50,7 @@ impl FacadeEngine {
         Ok(Self {
             engine: builder.build(),
             base_context: FacadeContext::default(),
+            legacy_routes,
         })
     }
     /// Embed a real preconfigured engine, e.g. register the actual document extractor.
@@ -50,6 +58,7 @@ impl FacadeEngine {
         Self {
             engine,
             base_context: FacadeContext::default(),
+            legacy_routes: false,
         }
     }
     pub fn runtime(&self) -> Runtime {
@@ -69,7 +78,52 @@ impl FacadeEngine {
         }
         context
     }
+    /// Probes LibreOffice only when a legacy Office route is selected and external execution is allowed.
+    /// Runs before any staging, so a missing tool never touches the input or output.
+    fn ensure_legacy_tooling(&self, input: &EngineRequest) -> Result<()> {
+        if !self.legacy_routes || !input.allow_external || !legacy_selected(input)? {
+            return Ok(());
+        }
+        probe_libreoffice()
+    }
 }
+
+/// True when the request resolves to a legacy Office route (explicit route, explicit format, or detected format).
+fn legacy_selected(input: &EngineRequest) -> Result<bool> {
+    if let Some(route) = &input.route {
+        return Ok(LEGACY_ROUTES.contains(&route.as_str()));
+    }
+    let format = match input.format.as_deref() {
+        Some("doc" | "rtf" | "ppt") => return Ok(true),
+        Some(_) => return Ok(false),
+        None => omniattach::detect(&input.input).map_err(map_error)?.format,
+    };
+    Ok(matches!(format, Format::Doc | Format::Rtf | Format::Ppt))
+}
+
+#[cfg(feature = "backends")]
+fn probe_libreoffice() -> Result<()> {
+    let runner = omniattach::backends::ProcessRunner;
+    let context = omniattach::backends::BackendContext::new(&runner);
+    omniattach::backends::Tool::new("libreoffice")
+        .probe(&["--version"], &context)
+        .map(|_| ())
+        .map_err(|e| {
+            CliError::new(
+                "TOOL_UNAVAILABLE",
+                format!(
+                    "LibreOffice is required for .doc, .rtf and .ppt conversion but did not run: {e}"
+                ),
+                8,
+            )
+        })
+}
+
+#[cfg(not(feature = "backends"))]
+fn probe_libreoffice() -> Result<()> {
+    Ok(())
+}
+
 fn request(input: &EngineRequest) -> Result<ConversionRequest> {
     let goal = match input.goal.as_str() {
         "extract" => Goal::Extract,
@@ -129,6 +183,7 @@ impl Engine for FacadeEngine {
         )
     }
     fn plan(&self, input: &EngineRequest) -> Result<Value> {
+        self.ensure_legacy_tooling(input)?;
         let plan = self
             .engine
             .plan(&request(input)?, &self.context(input, ProgressMode::None))
@@ -141,6 +196,7 @@ impl Engine for FacadeEngine {
         output: &Path,
         progress: ProgressMode,
     ) -> Result<ConversionOutcome> {
+        self.ensure_legacy_tooling(input)?;
         let context = self.context(input, progress);
         let bundle = self
             .engine
