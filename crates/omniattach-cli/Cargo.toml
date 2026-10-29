@@ -5,6 +5,7 @@ edition = "2024"
 description = "Machine-friendly command-line interface for omniattach file conversion"
 license = "Apache-2.0"
 readme = "README.md"
+repository = "https://github.com/bmihalik/omniattach"
 
 [[bin]]
 name = "omniattach"
@@ -24,7 +25,7 @@ serde_json = "1"
 thiserror = "2"
 quick-xml = "0.40"
 ctrlc = { version = "3.5", features = ["termination"] }
-omniattach = { path = "../omniattach", default-features = false, optional = true }
+omniattach = { path = "../omniattach", version = "0.2.0", default-features = false, optional = true }
 
 [dev-dependencies]
 tempfile = "3"

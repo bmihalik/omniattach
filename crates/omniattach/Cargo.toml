@@ -5,6 +5,7 @@ edition = "2024"
 description = "Explicit conversion orchestration facade for the omniattach workspace"
 license = "Apache-2.0"
 readme = "README.md"
+repository = "https://github.com/bmihalik/omniattach"
 
 [features]
 default = []
@@ -19,9 +20,9 @@ serde_json = "1"
 thiserror = "2"
 tempfile = "3"
 sha2 = "0.10"
-omniattach-core = { path = "../omniattach-core", optional = true }
-omniattach-documents = { path = "../omniattach-documents", optional = true }
-omniattach-backends = { path = "../omniattach-backends", optional = true }
+omniattach-core = { path = "../omniattach-core", version = "0.1.0", optional = true }
+omniattach-documents = { path = "../omniattach-documents", version = "0.2.0", optional = true }
+omniattach-backends = { path = "../omniattach-backends", version = "0.1.0", optional = true }
 
 [[example]]
 name = "external"
