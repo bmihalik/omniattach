@@ -14,6 +14,7 @@ exclude = ["target/", ".git/"]
 default = []
 office = ["dep:calamine", "dep:zip"]
 pdf = ["dep:lopdf"]
+azw3 = ["dep:mobi"]
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
@@ -29,7 +30,13 @@ percent-encoding = "2"
 zip = { version = "9.1", default-features = false, features = ["deflate"], optional = true }
 calamine = { version = "0.37", optional = true }
 lopdf = { version = "0.46", default-features = false, optional = true }
+mobi = { version = "0.8", default-features = false, optional = true }
 
 [[example]]
 name = "documents-convert"
 path = "examples/convert.rs"
+
+[[example]]
+name = "azw3-extract"
+path = "examples/azw3-extract.rs"
+required-features = ["azw3"]
