@@ -10,7 +10,7 @@ repository = "https://github.com/bmihalik/omniattach"
 [features]
 default = []
 core = ["dep:omniattach-core"]
-documents = ["dep:omniattach-documents", "omniattach-documents/office", "omniattach-documents/pdf"]
+documents = ["dep:omniattach-documents", "omniattach-documents/office", "omniattach-documents/pdf", "omniattach-documents/mobi", "omniattach-documents/azw3"]
 backends = ["dep:omniattach-backends"]
 workspace = ["core", "documents", "backends"]
 

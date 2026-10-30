@@ -36,6 +36,8 @@ fn document_format(format: Format) -> Option<DocFormat> {
         Format::Odp => DocFormat::Odp,
         Format::Xlsx | Format::Ods => DocFormat::Workbook,
         Format::Epub => DocFormat::Epub,
+        Format::Mobi => DocFormat::Mobi,
+        Format::Azw3 => DocFormat::Azw3,
         Format::Pdf => DocFormat::Pdf,
         Format::Html => DocFormat::Html,
         Format::Csv => DocFormat::Csv,
@@ -75,77 +77,45 @@ fn parse_ocr_options(options: &serde_json::Value) -> Result<OcrConfig> {
                             Error::Configuration("ocr_language option must be a string".into())
                         })?;
                         if lang.trim().is_empty()
-                            || !lang
-                                .bytes()
-                                .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'+')
+                            || !lang.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'+')
                         {
-                            return Err(Error::Configuration(
-                                "ocr_language must be a nonempty ASCII Tesseract language code"
-                                    .into(),
-                            ));
+                            return Err(Error::Configuration("ocr_language must be a nonempty ASCII Tesseract language code".into()));
                         }
                         cfg.language = lang.into();
                         language_or_dpi_set = true;
                     }
                     "ocr_dpi" => {
-                        let dpi = value
-                            .as_u64()
-                            .and_then(|n| u32::try_from(n).ok())
+                        let dpi = value.as_u64().and_then(|n| u32::try_from(n).ok())
                             .filter(|d| (72..=1200).contains(d))
-                            .ok_or_else(|| {
-                                Error::Configuration(
-                                    "ocr_dpi option must be an integer in 72..=1200".into(),
-                                )
-                            })?;
+                            .ok_or_else(|| Error::Configuration("ocr_dpi option must be an integer in 72..=1200".into()))?;
                         cfg.dpi = dpi;
                         language_or_dpi_set = true;
                     }
-                    _ => {
-                        return Err(Error::Configuration(
-                            "document routes accept only ocr, ocr_language and ocr_dpi options in 0.2.0; call omniattach-documents directly for mappings".into(),
-                        ));
-                    }
+                    _ => return Err(Error::Configuration("document routes accept only ocr, ocr_language and ocr_dpi options in 0.2.0; call omniattach-documents directly for mappings".into())),
                 }
             }
             if language_or_dpi_set && !cfg.enabled {
-                return Err(Error::Configuration(
-                    "ocr_language and ocr_dpi require ocr: true".into(),
-                ));
+                return Err(Error::Configuration("ocr_language and ocr_dpi require ocr: true".into()));
             }
             Ok(cfg)
         }
-        _ => Err(Error::Configuration(
-            "document routes accept only an options object in 0.2.0".into(),
-        )),
+        _ => Err(Error::Configuration("document routes accept only an options object in 0.2.0".into())),
     }
 }
 
 impl Converter for DocumentConverter {
-    fn convert(
-        &self,
-        input: &StagedInput,
-        request: &ConversionRequest,
-        context: &JobContext,
-    ) -> Result<ConversionData> {
+    fn convert(&self, input: &StagedInput, request: &ConversionRequest, context: &JobContext) -> Result<ConversionData> {
         context.check()?;
         let ocr = parse_ocr_options(&request.options)?;
         if input.format == Format::Xml {
-            return Err(Error::Configuration(
-                "XML needs an explicit column mapping; records are not guessed. Use omniattach-documents::extract_xml_table".into(),
-            ));
+            return Err(Error::Configuration("XML needs an explicit column mapping; records are not guessed. Use omniattach-documents::extract_xml_table".into()));
         }
-        let format = document_format(input.format).ok_or_else(|| {
-            Error::Configuration(format!("no document adapter for {:?}", input.format))
-        })?;
+        let format = document_format(input.format).ok_or_else(|| Error::Configuration(format!("no document adapter for {:?}", input.format)))?;
         if ocr.enabled && format != DocFormat::Pdf {
-            return Err(Error::Configuration(
-                "ocr option applies only to PDF documents".into(),
-            ));
+            return Err(Error::Configuration("ocr option applies only to PDF documents".into()));
         }
         #[cfg(feature = "backends")]
-        let ocr_words: std::sync::Arc<
-            std::sync::Mutex<Vec<omniattach_backends::TextUnit>>,
-        > = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let ocr_words: std::sync::Arc<std::sync::Mutex<Vec<omniattach_backends::TextUnit>>> = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         #[cfg(feature = "backends")]
         let pdf_ocr = if ocr.enabled {
             let path = input.path.clone();
@@ -153,113 +123,61 @@ impl Converter for DocumentConverter {
             let dpi = ocr.dpi;
             let words_out = ocr_words.clone();
             let runner = self.runner.clone();
-            Some(omniattach_documents::PdfOcr(std::sync::Arc::new(
-                move |page: u32| -> omniattach_documents::Result<String> {
-                    let ctx = omniattach_backends::BackendContext::new(runner.as_ref());
-                    let units = omniattach_backends::PdfPageOcr::default()
-                        .with_language(language.clone())
-                        .with_dpi(dpi)
-                        .recognize_page_words(&path, page, &ctx)
-                        .map_err(|e| omniattach_documents::Error::Parse(format!("OCR: {e}")))?;
-                    let text = units
-                        .iter()
-                        .map(|w| w.text.as_str())
-                        .collect::<Vec<_>>()
-                        .join(" ");
-                    words_out.lock().expect("ocr words lock").extend(units);
-                    Ok(text)
-                },
-            )))
-        } else {
-            None
-        };
+            Some(omniattach_documents::PdfOcr(std::sync::Arc::new(move |page: u32| -> omniattach_documents::Result<String> {
+                let ctx = omniattach_backends::BackendContext::new(runner.as_ref());
+                let units = omniattach_backends::PdfPageOcr::default().with_language(language.clone()).with_dpi(dpi)
+                    .recognize_page_words(&path, page, &ctx)
+                    .map_err(|e| omniattach_documents::Error::Parse(format!("OCR: {e}")))?;
+                let text = units.iter().map(|w| w.text.as_str()).collect::<Vec<_>>().join(" ");
+                words_out.lock().expect("ocr words lock").extend(units);
+                Ok(text)
+            })))
+        } else { None };
         #[cfg(not(feature = "backends"))]
         let pdf_ocr = if ocr.enabled {
-            return Err(Error::Configuration(
-                "ocr option requires the backends feature".into(),
-            ));
-        } else {
-            None
-        };
+            return Err(Error::Configuration("ocr option requires the backends feature".into()));
+        } else { None };
         let options = Options {
-            limits: Limits {
-                input_bytes: usize::try_from(context.policy().max_input_bytes)
-                    .unwrap_or(usize::MAX),
-                ..Default::default()
-            },
+            limits: Limits { input_bytes: usize::try_from(context.policy().max_input_bytes).unwrap_or(usize::MAX), ..Default::default() },
             pdf_ocr,
             ..Default::default()
         };
         let bytes = std::fs::read(&input.path)?;
         context.check()?;
-        let document =
-            omniattach_documents::extract_as(&input.source.name, &bytes, format, &options)
-                .map_err(document_error)?;
+        let document = omniattach_documents::extract_as(&input.source.name, &bytes, format, &options).map_err(document_error)?;
         context.check()?;
-        let ocr_pages: Vec<u32> = document
-            .blocks
-            .iter()
-            .filter(|b| b.source.path.as_deref() == Some("ocr"))
-            .filter_map(|b| b.source.page)
-            .collect();
+        let ocr_pages: Vec<u32> = document.blocks.iter().filter(|b| b.source.path.as_deref() == Some("ocr")).filter_map(|b| b.source.page).collect();
         let mut data = ConversionData::default().payload("omniattach-documents/0.1", &document)?;
         #[cfg(feature = "backends")]
         if !ocr_pages.is_empty() {
             let collected = ocr_words.lock().expect("ocr words lock").clone();
-            data = data.payload(
-                "omniattach-backends/pdf-ocr/0.1",
-                serde_json::json!({
-                    "language": ocr.language,
-                    "dpi": ocr.dpi,
-                    "confidence_scale": "tesseract_native_0_100",
-                    "coordinates": "rasterized_page_pixels",
-                    "words": collected,
-                }),
-            )?;
+            data = data.payload("omniattach-backends/pdf-ocr/0.1", serde_json::json!({
+                "language": ocr.language, "dpi": ocr.dpi, "confidence_scale": "tesseract_native_0_100",
+                "coordinates": "rasterized_page_pixels", "words": collected,
+            }))?;
         }
-        data.text.push(TextFragment {
-            text: document.to_text(),
-            location: serde_json::json!({"kind": "document_text", "ocr_pages": ocr_pages}),
-        });
+        data.text.push(TextFragment { text: document.to_text(), location: serde_json::json!({"kind": "document_text", "ocr_pages": ocr_pages}) });
         if !ocr_pages.is_empty() {
-            data.warn(
-                "OCR_TEXT",
-                format!(
-                    "Text on pages {ocr_pages:?} was recognized by local Tesseract OCR and may contain recognition errors"
-                ),
-            );
+            data.warn("OCR_TEXT", format!("Text on pages {ocr_pages:?} was recognized by local Tesseract OCR and may contain recognition errors"));
         }
-        std::fs::write(
-            input.output_dir.join("document.json"),
-            document.to_json().map_err(document_error)?,
-        )?;
-        data.artifacts
-            .push(PendingArtifact::new("document.json", "application/json"));
+        std::fs::write(input.output_dir.join("document.json"), document.to_json().map_err(document_error)?)?;
+        data.artifacts.push(PendingArtifact::new("document.json", "application/json"));
         match request.goal {
             Goal::Markdown => {
                 std::fs::write(input.output_dir.join("document.md"), document.to_markdown())?;
-                data.artifacts
-                    .push(PendingArtifact::new("document.md", "text/markdown"));
+                data.artifacts.push(PendingArtifact::new("document.md", "text/markdown"));
             }
             Goal::Tables => {
                 for (index, table) in document.tables.iter().enumerate() {
                     let file = format!("table-{:04}.csv", index + 1);
                     let csv = table.to_csv().map_err(document_error)?;
                     std::fs::write(input.output_dir.join(&file), csv)?;
-                    data.artifacts
-                        .push(
-                            PendingArtifact::new(&file, "text/csv").located(serde_json::json!({
-                                "table_id": table.id,
-                                "name": table.name,
-                            })),
-                        );
+                    data.artifacts.push(PendingArtifact::new(&file, "text/csv").located(serde_json::json!({"table_id": table.id, "name": table.name})));
                 }
             }
             _ => {}
         }
-        for diagnostic in &document.diagnostics {
-            data.warn(diagnostic.code.clone(), diagnostic.message.clone());
-        }
+        for diagnostic in &document.diagnostics { data.warn(diagnostic.code.clone(), diagnostic.message.clone()); }
         context.check()?;
         Ok(data)
     }
@@ -270,41 +188,19 @@ impl OmniAttachBuilder {
     pub fn with_document_defaults(self) -> Result<Self> {
         self.with_document_converter(DocumentConverter::new())
     }
-
-    /// Same as [`with_document_defaults`](Self::with_document_defaults), but OCR subprocesses run through `runner`.
+    /// Same registration, with an explicit runner for OCR subprocesses.
     #[cfg(feature = "backends")]
-    pub fn with_document_defaults_runner(
-        self,
-        runner: std::sync::Arc<dyn omniattach_backends::Runner>,
-    ) -> Result<Self> {
+    pub fn with_document_defaults_runner(self, runner: std::sync::Arc<dyn omniattach_backends::Runner>) -> Result<Self> {
         self.with_document_converter(DocumentConverter::with_runner(runner))
     }
-
     fn with_document_converter(self, converter: DocumentConverter) -> Result<Self> {
-        self.register(
-            Route::new(
-                "documents",
-                vec![
-                    Format::Docx,
-                    Format::Pptx,
-                    Format::Odt,
-                    Format::Odp,
-                    Format::Xlsx,
-                    Format::Ods,
-                    Format::Epub,
-                    Format::Pdf,
-                    Format::Html,
-                    Format::Csv,
-                    Format::Tsv,
-                    Format::Json,
-                    Format::JsonLines,
-                    Format::Xml,
-                ],
-                vec![Goal::Extract, Goal::Markdown, Goal::Tables],
-                ExecutionKind::InProcess,
-            )
-            .described("omniattach-documents: Office, ODF, EPUB, PDF, HTML, CSV, JSON; XML needs a mapping"),
-            converter,
-        )
+        self.register(Route::new(
+            "documents",
+            vec![Format::Docx, Format::Pptx, Format::Odt, Format::Odp, Format::Xlsx, Format::Ods,
+                 Format::Epub, Format::Mobi, Format::Azw3, Format::Pdf, Format::Html, Format::Csv,
+                 Format::Tsv, Format::Json, Format::JsonLines, Format::Xml],
+            vec![Goal::Extract, Goal::Markdown, Goal::Tables],
+            ExecutionKind::InProcess,
+        ).described("omniattach-documents: Office, ODF, EPUB, MOBI, experimental AZW3, PDF, HTML, CSV, JSON; XML needs a mapping"), converter)
     }
 }

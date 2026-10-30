@@ -16,13 +16,9 @@ pub struct FacadeEngine {
 impl FacadeEngine {
     pub fn new(config: &EngineConfig) -> Result<Self> {
         #[allow(unused_mut)]
-        let mut builder = OmniAttach::builder()
-            .with_portable_defaults()
-            .map_err(map_error)?;
+        let mut builder = OmniAttach::builder().with_portable_defaults().map_err(map_error)?;
         #[cfg(feature = "documents")]
-        {
-            builder = builder.with_document_defaults().map_err(map_error)?;
-        }
+        { builder = builder.with_document_defaults().map_err(map_error)?; }
         #[allow(unused_mut)]
         let mut legacy_routes = false;
         if config.external_backends {
@@ -35,31 +31,17 @@ impl FacadeEngine {
                     legacy_routes = true;
                 }
                 if let Some(model) = &config.whisper_model {
-                    builder = builder
-                        .with_whisper_cpp(model, &config.language)
-                        .map_err(map_error)?;
+                    builder = builder.with_whisper_cpp(model, &config.language).map_err(map_error)?;
                 }
             }
             #[cfg(not(feature = "backends"))]
-            {
-                return Err(CliError::unsupported(
-                    "--external-backends requires the backends Cargo feature",
-                ));
-            }
+            { return Err(CliError::unsupported("--external-backends requires the backends Cargo feature")); }
         }
-        Ok(Self {
-            engine: builder.build(),
-            base_context: FacadeContext::default(),
-            legacy_routes,
-        })
+        Ok(Self { engine: builder.build(), base_context: FacadeContext::default(), legacy_routes })
     }
     /// Embed a real preconfigured engine, e.g. register the actual document extractor.
     pub fn from_engine(engine: OmniAttach) -> Self {
-        Self {
-            engine,
-            base_context: FacadeContext::default(),
-            legacy_routes: false,
-        }
+        Self { engine, base_context: FacadeContext::default(), legacy_routes: false }
     }
     pub fn runtime(&self) -> Runtime {
         let cancellation = self.base_context.cancellation.clone();
@@ -73,26 +55,17 @@ impl FacadeEngine {
         context.policy.max_export_files = request.max_export_files;
         context.policy.timeout = request.timeout_ms.map(Duration::from_millis);
         context.policy.scratch_parent = request.scratch_parent.clone();
-        if progress == ProgressMode::Ndjson {
-            context = context.with_progress(NdjsonProgress);
-        }
+        if progress == ProgressMode::Ndjson { context = context.with_progress(NdjsonProgress); }
         context
     }
-    /// Probes LibreOffice only when a legacy Office route is selected and external execution is allowed.
-    /// Runs before any staging, so a missing tool never touches the input or output.
+    /// Probes LibreOffice only for permitted legacy Office requests before staging.
     fn ensure_legacy_tooling(&self, input: &EngineRequest) -> Result<()> {
-        if !self.legacy_routes || !input.allow_external || !legacy_selected(input)? {
-            return Ok(());
-        }
+        if !self.legacy_routes || !input.allow_external || !legacy_selected(input)? { return Ok(()); }
         probe_libreoffice()
     }
 }
-
-/// True when the request resolves to a legacy Office route (explicit route, explicit format, or detected format).
 fn legacy_selected(input: &EngineRequest) -> Result<bool> {
-    if let Some(route) = &input.route {
-        return Ok(LEGACY_ROUTES.contains(&route.as_str()));
-    }
+    if let Some(route) = &input.route { return Ok(LEGACY_ROUTES.contains(&route.as_str())); }
     let format = match input.format.as_deref() {
         Some("doc" | "rtf" | "ppt") => return Ok(true),
         Some(_) => return Ok(false),
@@ -100,29 +73,16 @@ fn legacy_selected(input: &EngineRequest) -> Result<bool> {
     };
     Ok(matches!(format, Format::Doc | Format::Rtf | Format::Ppt))
 }
-
 #[cfg(feature = "backends")]
 fn probe_libreoffice() -> Result<()> {
     let runner = omniattach::backends::ProcessRunner;
     let context = omniattach::backends::BackendContext::new(&runner);
-    omniattach::backends::Tool::new("libreoffice")
-        .probe(&["--version"], &context)
-        .map(|_| ())
-        .map_err(|e| {
-            CliError::new(
-                "TOOL_UNAVAILABLE",
-                format!(
-                    "LibreOffice is required for .doc, .rtf and .ppt conversion but did not run: {e}"
-                ),
-                8,
-            )
-        })
+    omniattach::backends::Tool::new("libreoffice").probe(&["--version"], &context).map(|_| ()).map_err(|e| {
+        CliError::new("TOOL_UNAVAILABLE", format!("LibreOffice is required for .doc, .rtf and .ppt conversion but did not run: {e}"), 8)
+    })
 }
-
 #[cfg(not(feature = "backends"))]
-fn probe_libreoffice() -> Result<()> {
-    Ok(())
-}
+fn probe_libreoffice() -> Result<()> { Ok(()) }
 
 fn request(input: &EngineRequest) -> Result<ConversionRequest> {
     let goal = match input.goal.as_str() {
@@ -139,8 +99,7 @@ fn request(input: &EngineRequest) -> Result<ConversionRequest> {
         custom if custom.starts_with("custom:") => Goal::Custom(custom[7..].into()),
         other => return Err(CliError::usage(format!("unknown goal {other}"))),
     };
-    let mut converted =
-        ConversionRequest::new(&input.input, goal).with_options(input.options.clone());
+    let mut converted = ConversionRequest::new(&input.input, goal).with_options(input.options.clone());
     if let Some(format) = &input.format {
         let format = match format.as_str() {
             "text" => Format::Text,
@@ -159,6 +118,8 @@ fn request(input: &EngineRequest) -> Result<ConversionRequest> {
             "odp" => Format::Odp,
             "ods" => Format::Ods,
             "epub" => Format::Epub,
+            "mobi" => Format::Mobi,
+            "azw3" => Format::Azw3,
             "doc" => Format::Doc,
             "ppt" => Format::Ppt,
             "xls" => Format::Xls,
@@ -171,38 +132,22 @@ fn request(input: &EngineRequest) -> Result<ConversionRequest> {
         };
         converted = converted.with_format(format);
     }
-    if let Some(route) = &input.route {
-        converted = converted.with_route(route);
-    }
+    if let Some(route) = &input.route { converted = converted.with_route(route); }
     Ok(converted)
 }
 impl Engine for FacadeEngine {
     fn capabilities(&self) -> Result<Value> {
-        Ok(
-            json!({"routes":self.engine.capabilities(),"conversion_enabled":true,"installed_tools_probed":false,"documents_auto_registered":cfg!(feature = "documents")}),
-        )
+        Ok(json!({"routes":self.engine.capabilities(),"conversion_enabled":true,"installed_tools_probed":false,"documents_auto_registered":cfg!(feature = "documents")}))
     }
     fn plan(&self, input: &EngineRequest) -> Result<Value> {
         self.ensure_legacy_tooling(input)?;
-        let plan = self
-            .engine
-            .plan(&request(input)?, &self.context(input, ProgressMode::None))
-            .map_err(map_error)?;
+        let plan = self.engine.plan(&request(input)?, &self.context(input, ProgressMode::None)).map_err(map_error)?;
         Ok(serde_json::to_value(plan)?)
     }
-    fn convert(
-        &self,
-        input: &EngineRequest,
-        output: &Path,
-        progress: ProgressMode,
-    ) -> Result<ConversionOutcome> {
+    fn convert(&self, input: &EngineRequest, output: &Path, progress: ProgressMode) -> Result<ConversionOutcome> {
         self.ensure_legacy_tooling(input)?;
         let context = self.context(input, progress);
-        let bundle = self
-            .engine
-            .convert(&request(input)?, &context)
-            .map_err(map_error)?;
-        // Export while the bundle owns its temporary directory.
+        let bundle = self.engine.convert(&request(input)?, &context).map_err(map_error)?;
         bundle.export(output).map_err(map_error)?;
         let manifest = serde_json::to_value(bundle.manifest())?;
         let text = bundle.plain_text();
