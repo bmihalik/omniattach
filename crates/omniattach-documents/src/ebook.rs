@@ -5,15 +5,24 @@ fn invalid(message: &str) -> Error {
     Error::InvalidInput(format!("MOBI/AZW3: {message}"))
 }
 fn u16_at(bytes: &[u8], offset: usize) -> Result<usize> {
-    let value = bytes.get(offset..offset + 2).ok_or_else(|| invalid("truncated header"))?;
+    let value = bytes
+        .get(offset..offset + 2)
+        .ok_or_else(|| invalid("truncated header"))?;
     Ok(u16::from_be_bytes([value[0], value[1]]) as usize)
 }
 fn u32_at(bytes: &[u8], offset: usize) -> Result<usize> {
-    let value = bytes.get(offset..offset + 4).ok_or_else(|| invalid("truncated header"))?;
+    let value = bytes
+        .get(offset..offset + 4)
+        .ok_or_else(|| invalid("truncated header"))?;
     Ok(u32::from_be_bytes([value[0], value[1], value[2], value[3]]) as usize)
 }
 
-pub(crate) fn extract(doc: &mut Document, bytes: &[u8], format: Format, options: &Options) -> Result<()> {
+pub(crate) fn extract(
+    doc: &mut Document,
+    bytes: &[u8],
+    format: Format,
+    options: &Options,
+) -> Result<()> {
     if bytes.get(60..68) != Some(b"BOOKMOBI") {
         return Err(invalid("expected BOOKMOBI Palm database signature"));
     }
@@ -40,7 +49,9 @@ pub(crate) fn extract(doc: &mut Document, bytes: &[u8], format: Format, options:
         return Err(invalid("missing MOBI header"));
     }
     if u16_at(header, 12)? != 0 {
-        return Err(invalid("DRM/encrypted content is unsupported; no decryption is attempted"));
+        return Err(invalid(
+            "DRM/encrypted content is unsupported; no decryption is attempted",
+        ));
     }
     let compression = u16_at(header, 0)?;
     if !matches!(compression, 1 | 2) {
@@ -52,7 +63,9 @@ pub(crate) fn extract(doc: &mut Document, bytes: &[u8], format: Format, options:
     }
     let version = u32_at(header, 36)?;
     if format == Format::Mobi && version >= 8 {
-        return Err(invalid("KF8 content requires explicit Format::Azw3 and the azw3 feature"));
+        return Err(invalid(
+            "KF8 content requires explicit Format::Azw3 and the azw3 feature",
+        ));
     }
     // Extra-record-data flags are a u16 at absolute record-zero offset 242.
     if length >= 228 && u16_at(header, 242)? != 0 {
@@ -67,19 +80,29 @@ pub(crate) fn extract(doc: &mut Document, bytes: &[u8], format: Format, options:
     }
     let last = text_count + 1;
     let start = second;
-    let end = if last == count { bytes.len() } else { u32_at(bytes, 78 + last * 8)? };
+    let end = if last == count {
+        bytes.len()
+    } else {
+        u32_at(bytes, 78 + last * 8)?
+    };
     let factor = if compression == 2 { 8 } else { 1 };
-    let bound = (end - start).checked_mul(factor).and_then(|n| n.checked_mul(3))
+    let bound = (end - start)
+        .checked_mul(factor)
+        .and_then(|n| n.checked_mul(3))
         .ok_or_else(|| Error::LimitExceeded("MOBI decoded size overflow".into()))?;
     if bound as u64 > options.limits.archive_bytes {
-        return Err(Error::LimitExceeded("MOBI conservative decoded byte bound".into()));
+        return Err(Error::LimitExceeded(
+            "MOBI conservative decoded byte bound".into(),
+        ));
     }
     let book = mobi::Mobi::from_read(bytes).map_err(|e| invalid(&format!("parser: {e}")))?;
     let range = book.readable_records_range();
     if range.start != 1 || range.end != last {
         return Err(invalid("unsupported text range or hybrid container"));
     }
-    let html = book.content_as_string().map_err(|e| invalid(&format!("decoding: {e}")))?;
+    let html = book
+        .content_as_string()
+        .map_err(|e| invalid(&format!("decoding: {e}")))?;
     if html.trim().is_empty() {
         return Err(invalid("no readable text"));
     }

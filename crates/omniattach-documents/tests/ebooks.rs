@@ -10,19 +10,28 @@ fn ebook_extensions_are_case_insensitive() {
 #[cfg(not(feature = "mobi"))]
 #[test]
 fn mobi_requires_its_feature() {
-    assert!(matches!(extract_bytes("book.mobi", b"", &Options::default()), Err(Error::FeatureDisabled(_))));
+    assert!(matches!(
+        extract_bytes("book.mobi", b"", &Options::default()),
+        Err(Error::FeatureDisabled(_))
+    ));
 }
 
 #[cfg(feature = "mobi")]
 #[test]
 fn malformed_mobi_is_not_treated_as_text() {
-    assert!(matches!(extract_bytes("book.mobi", b"plain text", &Options::default()), Err(Error::InvalidInput(_))));
+    assert!(matches!(
+        extract_bytes("book.mobi", b"plain text", &Options::default()),
+        Err(Error::InvalidInput(_))
+    ));
 }
 
 #[cfg(not(feature = "azw3"))]
 #[test]
 fn azw3_requires_its_feature() {
-    assert!(matches!(extract_bytes("book.azw3", b"", &Options::default()), Err(Error::FeatureDisabled(_))));
+    assert!(matches!(
+        extract_bytes("book.azw3", b"", &Options::default()),
+        Err(Error::FeatureDisabled(_))
+    ));
 }
 
 #[cfg(feature = "office")]
@@ -35,5 +44,8 @@ fn malformed_epub_is_not_treated_as_text() {
 fn input_limit_applies_before_ebook_parsing() {
     let mut options = Options::default();
     options.limits.input_bytes = 1;
-    assert!(matches!(extract_bytes("book.mobi", b"too big", &options), Err(Error::LimitExceeded(_))));
+    assert!(matches!(
+        extract_bytes("book.mobi", b"too big", &options),
+        Err(Error::LimitExceeded(_))
+    ));
 }
