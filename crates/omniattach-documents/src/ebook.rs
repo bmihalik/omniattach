@@ -3,6 +3,8 @@ use crate::{Document, Error, Format, Options, Result};
 
 #[path = "ebook_huff.rs"]
 mod huff;
+#[path = "ebook_flows.rs"]
+mod flows;
 
 fn invalid(message: &str) -> Error {
     Error::InvalidInput(format!("MOBI/AZW3: {message}"))
@@ -214,14 +216,29 @@ pub(crate) fn extract(
             }
         }
     }
-    if output.len() != expected {
-        return Err(invalid(&format!(
-            "decoded text length mismatch: declared {expected}, decoded {}",
-            output.len()
-        )));
-    }
+    let (primary, ignored_flows) = if version == 8 && length >= 184 && u32_at(header, 196)? > 1 {
+        let index = u32_at(header, 192)?;
+        if index <= text_count || index >= count {
+            return Err(invalid("FDST record reference outside non-text records"));
+        }
+        flows::first_flow(
+            &output,
+            expected,
+            record(index),
+            u32_at(header, 196)?,
+            options.limits.archive_entries,
+        )?
+    } else {
+        if output.len() != expected {
+            return Err(invalid(&format!(
+                "decoded text length mismatch: declared {expected}, decoded {}",
+                output.len()
+            )));
+        }
+        (output.as_slice(), 0)
+    };
     let encoding = u32_at(header, 28)?;
-    let html = decode_text(&output, encoding)?;
+    let html = decode_text(primary, encoding)?;
     if html.len() > limit {
         return Err(Error::LimitExceeded("ebook decoded UTF-8 bytes".into()));
     }
@@ -229,6 +246,9 @@ pub(crate) fn extract(
         return Err(invalid("no readable text"));
     }
     crate::html::extract(doc, &html, None, options)?;
+    if ignored_flows > 0 {
+        doc.warn("AZW3_SECONDARY_FLOWS_SKIPPED", format!("Validated FDST table covers {} decoded bytes; only the {expected}-byte primary flow was projected. {ignored_flows} secondary flows ({} bytes) were not rendered or exported.", output.len(), output.len() - primary.len()));
+    }
     if length >= 76 {
         let start = u32_at(header, 84)?;
         let title_length = u32_at(header, 88)?;
