@@ -7,6 +7,8 @@
 //! assert!(document.to_markdown().contains("# Notes"));
 //! # Ok::<(), omniattach_documents::Error>(())
 //! ```
+#[cfg(feature = "mobi")]
+mod ebook;
 mod error;
 mod html;
 mod model;
@@ -48,6 +50,8 @@ pub enum Format {
     Odp,
     Workbook,
     Epub,
+    Mobi,
+    Azw3,
     Pdf,
 }
 
@@ -84,6 +88,8 @@ pub fn detect_format(name: &str) -> Result<Format> {
         "odp" => Format::Odp,
         "xlsx" | "xlsm" | "xlsb" | "xls" | "ods" => Format::Workbook,
         "epub" => Format::Epub,
+        "mobi" => Format::Mobi,
+        "azw3" => Format::Azw3,
         "pdf" => Format::Pdf,
         _ => return Err(Error::UnsupportedFormat(extension)),
     })
@@ -122,6 +128,15 @@ pub fn extract_as(name: &str, bytes: &[u8], format: Format, options: &Options) -
         assets: Vec::new(),
     };
     match format {
+        Format::Mobi | Format::Azw3 => {
+            if format == Format::Azw3 && !cfg!(feature = "azw3") {
+                return Err(Error::FeatureDisabled("azw3".into()));
+            }
+            #[cfg(feature = "mobi")]
+            ebook::extract(&mut doc, bytes, format, options)?;
+            #[cfg(not(feature = "mobi"))]
+            return Err(Error::FeatureDisabled("mobi".into()));
+        }
         Format::Docx
         | Format::Pptx
         | Format::Odt

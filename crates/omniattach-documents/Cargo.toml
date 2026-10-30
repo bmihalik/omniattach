@@ -14,7 +14,11 @@ exclude = ["target/", ".git/"]
 default = []
 office = ["dep:calamine", "dep:zip"]
 pdf = ["dep:lopdf"]
-azw3 = ["dep:mobi"]
+mobi = ["dep:mobi"]
+azw3 = ["mobi"]
+# EPUB currently shares the existing Office package reader.
+epub = ["office"]
+ebooks = ["epub", "mobi", "azw3"]
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
