@@ -1,11 +1,14 @@
 use crate::{BlockKind, Diagnostic, Document, Error, Options, Result, SourceSpan};
 use std::collections::{BTreeMap, BTreeSet};
 
+#[path = "pdf_spacing.rs"]
+mod spacing;
+
 const MAX_OUTLINE_ITEMS: usize = 10_000;
 const MAX_OUTLINE_DEPTH: u32 = 32;
 
 pub(crate) fn extract(doc: &mut Document, bytes: &[u8], options: &Options) -> Result<()> {
-    let pdf = lopdf::Document::load_mem_with_options(
+    let mut pdf = lopdf::Document::load_mem_with_options(
         bytes,
         lopdf::LoadOptions {
             max_decompressed_size: Some(
@@ -25,13 +28,20 @@ pub(crate) fn extract(doc: &mut Document, bytes: &[u8], options: &Options) -> Re
         return Err(Error::LimitExceeded("PDF pages".into()));
     }
     outline_headings(doc, &pdf, &pages);
+    let mut spacing_repaired = false;
     for page in pages.keys() {
         let span = SourceSpan {
             page: Some(*page),
             ..Default::default()
         };
+        spacing_repaired |= spacing::normalize_page(
+            &mut pdf,
+            pages[page],
+            options.limits.archive_bytes.min(usize::MAX as u64) as usize,
+        )
+        .map_err(|e| Error::Parse(format!("PDF page {page} spacing: {e}")))?;
         let text = pdf
-            .extract_text_with_limit(&[*page], options.limits.archive_bytes as usize)
+            .extract_text_with_limit(&[*page], options.limits.archive_bytes.min(usize::MAX as u64) as usize)
             .map_err(|e| Error::Parse(format!("PDF page {page}: {e}")))?;
         if !text.trim().is_empty() {
             doc.paragraph(BlockKind::Paragraph, text.trim_end().into(), span);
@@ -64,6 +74,9 @@ pub(crate) fn extract(doc: &mut Document, bytes: &[u8], options: &Options) -> Re
                 source: Some(span),
             });
         }
+    }
+    if spacing_repaired {
+        doc.warn("PDF_TJ_SPACING_NORMALIZED", "Real-valued TJ word gaps were normalized in the in-memory extraction copy to match lopdf's integer-gap spacing heuristic; original PDF bytes and source identity are unchanged. This is not full geometric layout reconstruction.");
     }
     let mut seen = BTreeSet::new();
     for (page, page_id) in &pages {
