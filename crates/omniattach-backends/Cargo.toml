@@ -5,6 +5,7 @@ edition = "2024"
 description = "Local external conversion backends for the omniattach document and media pipeline"
 license = "Apache-2.0"
 readme = "README.md"
+repository.workspace = true
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }

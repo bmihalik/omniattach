@@ -5,6 +5,7 @@ edition = "2024"
 description = "Local document extraction with structured tables, source provenance and AI-friendly renderers"
 license = "Apache-2.0"
 readme = "README.md"
+repository.workspace = true
 keywords = ["document", "markdown", "conversion", "rag", "odf"]
 categories = ["text-processing", "parser-implementations"]
 exclude = ["target/", ".git/"]
