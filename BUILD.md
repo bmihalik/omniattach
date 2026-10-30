@@ -1,148 +1,119 @@
-# Build and Test Guide
+# Build and test guide
 
-This guide covers building omniattach, running its tests, and formatting the sources. Run every command from the repository root unless noted.
+Run commands from the repository root. Release manifests for documents, facade and CLI target 0.3.0; see CHANGELOG.md and PUBLISHING.md.
 
-## 1. Prerequisites
+## Toolchain
 
-- Rust 1.85 or newer. The workspace uses edition 2024.
-- `rustfmt` and `clippy`:
+Use current stable Rust with edition-2024 support. This guide does not certify a workspace-wide minimum Rust version: source features and dependency versions may require a newer compiler than the edition baseline.
 
-```bash
+```sh
 rustup update stable
 rustup component add rustfmt clippy
+rustc --version
+cargo --version
 ```
 
-- Optional external tools for the `backends` feature, all found on `PATH`:
-  - `libreoffice` for `.doc`, `.rtf`, `.ppt` and Office conversion
-  - `pdftotext` (Poppler) for PDF text
-  - `tesseract` for OCR
-  - `ffmpeg` and `ffprobe` for audio and video
-- Optional: `sqlite3` for inspecting databases.
+Dependencies are not vendored; initial builds need registry access or an existing cache. External converters are runtime prerequisites, not Rust build prerequisites.
 
-External tools are needed only at runtime, not to compile. Missing tools cause no build failure. The CLI reports `TOOL_UNAVAILABLE` only when a request needs one.
+## Checkout and build
 
-## 2. Get the Sources
-
-```bash
-git clone https://github.com/bmihalik/omniattach.git   # first time
+```sh
+git clone https://github.com/bmihalik/omniattach.git
 cd omniattach
-git pull --ff-only origin main                         # existing checkout
+# Existing checkout:
+git pull --ff-only origin main
+cargo build -p omniattach-cli
+cargo build -p omniattach-cli --release --features workspace
 ```
 
-`--ff-only` avoids accidental merge commits.
+Default CLI features enable document, PDF, EPUB, MOBI and experimental AZW3 routes. workspace also compiles external backend adapters and core integration. Binaries are under target/debug or target/release.
 
-## 3. Workspace Layout
+## Feature matrix
 
-| Crate | Purpose |
-|---|---|
-| `omniattach-core` | Shared bundle, progress, and backend contracts |
-| `omniattach-documents` | Local document extraction (feature `office`, `pdf`) |
-| `omniattach-backends` | Subprocess conversion backends (LibreOffice, Poppler, FFmpeg, Tesseract, Whisper) |
-| `omniattach` | Conversion facade and feature gates |
-| `omniattach-cli` | The `omniattach` binary |
-
-`crates/omniattach/verification` and `crates/omniattach-cli/verification` are standalone harnesses. They are excluded from the workspace.
-
-## 4. Feature Flags
-
-| Crate | Feature | Enables |
+| Package | Feature | Meaning |
 |---|---|---|
-| `omniattach-cli` | `facade` (default) | Conversion commands |
-| `omniattach-cli` | `documents` (default) | Document routes |
-| `omniattach-cli` | `backends` | External backend routes |
-| `omniattach-cli` | `workspace` | Documents, backends, and core re-exports |
-| `omniattach-documents` | `office` | DOCX, PPTX, XLSX, ODF, EPUB |
-| `omniattach-documents` | `pdf` | PDF text extraction |
+| CLI | facade | Conversion facade, default |
+| CLI | documents | Document routes including ebooks, default |
+| CLI | backends | Optional subprocess adapters |
+| CLI | workspace | Documents/backends/core |
+| Documents | office | Office, ODF, EPUB and workbooks |
+| Documents | pdf | PDF extraction |
+| Documents | epub | Alias for office |
+| Documents | mobi | MOBI reader |
+| Documents | azw3 | Experimental AZW3, implies mobi |
+| Documents | ebooks | EPUB/MOBI/AZW3 |
 
-The `workspace` feature is the usual choice for a full local build.
+The facade's documents feature enables the document library's office, pdf, mobi and azw3 features. Feature compilation and runtime route registration are separate; library callers register defaults explicitly.
 
-## 5. Build
+## Local checks and lockfile
 
-```bash
-cargo build                                   # debug, default members
-cargo build --release                         # optimized
-cargo build -p omniattach-cli --features workspace
-```
+After version/dependency changes, let Cargo refresh the root Cargo.lock and review its diff. Do not edit checksums or resolved dependency entries by hand. Once current, repeat verification with --locked where applicable.
 
-Binaries go to `target/debug/` or `target/release/`. The CLI binary is `omniattach`.
-
-## 6. Test
-
-Run the full workspace suite:
-
-```bash
+```sh
+cargo check --workspace --all-features --all-targets
+cargo fmt --all
+cargo fmt --all -- --check
 cargo test --workspace --all-features
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+```
+
+Targeted checks:
+
+```sh
+cargo test -p omniattach-documents --features pdf --test pdf_spacing
+cargo test -p omniattach-documents --features azw3
+cargo test -p omniattach-documents --features ebooks
+cargo test -p omniattach-cli --test ebooks
 cargo test -p omniattach-cli --features workspace
+cargo test -p omniattach
 ```
 
-Test the document crate with its optional families:
+## Real-file smoke tests
 
-```bash
-cargo test -p omniattach-documents --features office
-cargo test -p omniattach-documents --all-features
+```sh
+./target/debug/omniattach probe book.azw3 --pretty
+./target/debug/omniattach plan book.azw3 --goal markdown
+./target/debug/omniattach convert book.azw3 --goal markdown --output new-book-export
 ```
 
-Run the isolated facade harness. It needs no sibling crates:
+Inspect document.json diagnostics and document.md. Ebooks run in process; --allow-external is unnecessary. A plan is not proof that conversion will succeed. AZW3 completeness/reading order is not universally certified.
 
-```bash
-cd crates/omniattach
-./verification/check.sh
+For the supplied local PDF spacing regression:
+
+```sh
+OMNIATTACH_SPACING_PDF=/path/to/regression.pdf \
+  cargo test -p omniattach-documents --features pdf --test pdf_spacing \
+  supplied_timeline_pdf_recovers_the_reported_phrase -- --ignored
 ```
 
-Run the CLI harness the same way:
+## External-tool tests
 
-```bash
-cd crates/omniattach-cli
-./verification/check.sh
-```
+Install only tools required by selected routes: LibreOffice, Poppler (pdftotext/pdftoppm), Tesseract and language data, FFmpeg/FFprobe, or an explicitly configured whisper.cpp executable/model. No tools/models are downloaded by registration. The built-in process runner's platform limitations are documented in the backend crate.
 
-### Opt-in OCR test
+scripts/test_pdf_ocr.sh additionally uses ImageMagick and a working PDF-creation route such as img2pdf/tiff2pdf where installed. To use an existing scan:
 
-This test needs `pdftoppm`, `tesseract`, and ImageMagick (`magick` or `convert`):
-
-```bash
-scripts/test_pdf_ocr.sh
-```
-
-For a specific scanned PDF:
-
-```bash
+```sh
 OMNIATTACH_SCANNED_PDF=/path/to/scan.pdf OMNIATTACH_EXPECTED_OCR_TEXT=word \
   cargo test -p omniattach --features workspace --test pdf_ocr_route -- --ignored
 ```
 
-### Opt-in network smoke test
+scripts/smoke-net.sh downloads public samples and requires network and its selected converters. Review scripts before running. Native converter tests may require --ignored and installed filters/data; unit-test success does not establish real-tool quality.
 
-`scripts/smoke-net.sh` downloads sample files and runs the CLI against them. It needs network access and the external tools above.
+## Excluded verification harnesses
 
-## 7. Lint
+crates/omniattach/verification and crates/omniattach-cli/verification are independent portable/inspection harnesses, not release workspace packages. Run each script in a separate subshell:
 
-```bash
-cargo clippy --workspace --all-targets --all-features -- -D warnings
+```sh
+(cd crates/omniattach && ./verification/check.sh)
+(cd crates/omniattach-cli && ./verification/check.sh)
 ```
 
-## 8. Format
+They have separate manifests/lockfiles. Do not enable integration features on the isolated harnesses. Their package versions need not match release packages.
 
-```bash
-cargo fmt --all                # rewrite files
-cargo fmt --all -- --check     # verify only; non-zero exit on differences
-```
+## Release checks and cleanup
 
-Rustfmt reads `rustfmt.toml` or `.rustfmt.toml` from the repository, or from a parent directory. Without one it uses defaults.
+See PUBLISHING.md for package inspection, dry runs and dependency order. This document does not assert that commands have passed for the current commit.
 
-## 9. Full Check Before Pushing
-
-```bash
-cargo fmt --all -- --check
-cargo check --all-targets
-cargo clippy --all-targets -- -D warnings
-cargo test --workspace
-```
-
-Review changes with `git diff` before committing.
-
-## 10. Cleanup
-
-```bash
+```sh
 cargo clean
 ```

@@ -1,77 +1,66 @@
 # Publishing to crates.io
 
-The repository root is a virtual Cargo workspace, not a package. Publish its five member packages individually. Package versions are independent:
+The root is a virtual workspace, not a package. Release package versions are independent:
 
-| Package | Version |
+| Package | Target version |
 |---|---|
-| omniattach-core | 0.1.0 |
-| omniattach-documents | 0.2.0 |
-| omniattach-backends | 0.1.0 |
-| omniattach | 0.2.0 |
-| omniattach-cli | 0.2.0 |
+| omniattach-core | 0.1.0 (unchanged) |
+| omniattach-documents | 0.3.0 |
+| omniattach-backends | 0.1.0 (unchanged) |
+| omniattach | 0.3.0 |
+| omniattach-cli | 0.3.0 |
 
-Internal dependencies specify both a local path and a registry version. Keep these requirements consistent with the member package versions when releasing. The isolated verification harnesses are not release packages.
+0.3.0 introduces ebook formats/routes and public enum variants; downstream exhaustive matches may need migration. Keep each internal path dependency's registry requirement aligned with the intended release. The facade and CLI require the 0.3.0 dependency line, not the older 0.2.x packages lacking these features. Schema identifiers are versioned separately and are not automatically bumped.
 
-## Validate locally
+## Prepare locally
 
-Use a current stable Rust toolchain. Run from the repository root:
+Use current stable Rust. Let Cargo update the root Cargo.lock through normal resolution; review and commit that diff before locked release checks. This manifest/documentation change does not regenerate the lockfile. Excluded verification harnesses have their own package versions and lockfiles and are not published as workspace releases.
 
 ```sh
-cargo metadata --format-version 1 --no-deps
+cargo check --workspace --all-features --all-targets
 cargo fmt --all -- --check
 cargo test --workspace --all-features
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 ```
 
-Review and commit any Cargo.lock changes produced by Cargo. Do not regenerate the lockfile by hand. Inspect each release archive, including README, licensing material, source files and test fixtures:
+After the root lockfile is current, repeat checks using --locked. Review package file lists, README/license inclusion and accidental fixtures or secrets:
 
 ```sh
-cargo package -p omniattach-core --list
 cargo package -p omniattach-documents --list
-cargo package -p omniattach-backends --list
 cargo package -p omniattach --list
 cargo package -p omniattach-cli --list
 ```
 
-Before upload, confirm package names are available to your crates.io account and review public documentation for outdated claims. Passing workspace tests is not a substitute for verifying the packaged crates. Runtime external tools and model files are not installed by Cargo; test their integrations separately where applicable.
+Check registry ownership, name availability and already-published versions. Never attempt to republish an existing version. Keep tokens out of source and logs; authenticate with cargo login or a securely supplied registry credential.
 
-## Authenticate
+## Dry run and upload
 
-Authenticate with crates.io using cargo login or a securely supplied registry token. Never commit a token to the repository.
-
-## Publish in dependency order
-
-For each package below, run the dry run first, inspect its result, then deliberately execute the upload command. The first three packages are independent; the facade depends on them, and the CLI depends on the facade.
+A workspace-wide cargo publish --dry-run worked with the maintainer's Cargo and used a temporary registry for interdependent packages. Older Cargo versions or per-package dry runs may require dependencies to exist in crates.io first. Follow actual Cargo errors; do not bypass verification with --no-verify.
 
 ```sh
-cargo publish -p omniattach-core --dry-run
-cargo publish -p omniattach-core
+cargo publish --dry-run
+```
 
-cargo publish -p omniattach-documents --dry-run
+Only after explicit local review, publish in dependency order:
+
+```sh
 cargo publish -p omniattach-documents
-
-cargo publish -p omniattach-backends --dry-run
-cargo publish -p omniattach-backends
-
-cargo publish -p omniattach --dry-run
 cargo publish -p omniattach
-
-cargo publish -p omniattach-cli --dry-run
 cargo publish -p omniattach-cli
 ```
 
-Wait for each dependency version to be available in the registry before checking or publishing its dependents. On the first release, downstream dry runs may fail until their dependencies are published. Do not bypass package verification with --no-verify merely to force an upload. Published versions cannot be overwritten; fix problems before uploading.
+The unchanged core/backend versions must already be available to the publishing account/registry. If they have never been published, verify and publish omniattach-core 0.1.0 and omniattach-backends 0.1.0 first; otherwise skip them. Wait for registry availability before dependent uploads. A dry run does not reserve names or guarantee permission to publish.
 
-## Verify the installed CLI
+## Verify installed CLI
 
-After publication, test installation outside this workspace:
+After publication, outside the checkout:
 
 ```sh
-cargo install omniattach-cli --version 0.2.0 --features workspace
+cargo install omniattach-cli --version 0.3.0
 omniattach --version
 omniattach capabilities --pretty
 ```
 
-The package name is omniattach-cli; the executable name is omniattach. External routes still require runtime registration and explicit execution permission.
+Add --features workspace when external backend adapters are wanted. The package is omniattach-cli; the binary is omniattach. Ebook routes need no external registration or execution permission. Confirm diagnostics and output on authorized representative files; no full KF8 fidelity claim is made.
 
-This guide does not certify that release validation has run, and adding it does not publish any package.
+No command in this guide is evidence it has run. Version/documentation commits do not create tags, GitHub releases or crates.io uploads. Coordinate release tags only after validation.

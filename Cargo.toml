@@ -23,7 +23,7 @@ exclude = [
 ]
 
 [workspace.package]
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 license = "Apache-2.0"
 authors = ["Bela Istvan MIHALIK"]
@@ -35,10 +35,10 @@ categories = ["command-line-utilities", "parser-implementations", "text-processi
 [workspace.dependencies]
 # Internal workspace crates
 omniattach-core = { path = "crates/omniattach-core", version = "0.1.0" }
-omniattach-documents = { path = "crates/omniattach-documents", version = "0.2.0" }
+omniattach-documents = { path = "crates/omniattach-documents", version = "0.3.0" }
 omniattach-backends = { path = "crates/omniattach-backends", version = "0.1.0" }
-omniattach = { path = "crates/omniattach", version = "0.2.0", default-features = false }
-omniattach-cli = { path = "crates/omniattach-cli", version = "0.2.0" }
+omniattach = { path = "crates/omniattach", version = "0.3.0", default-features = false }
+omniattach-cli = { path = "crates/omniattach-cli", version = "0.3.0" }
 
 # Core serialization, error handling, and system utilities
 serde = { version = "1", features = ["derive"] }
