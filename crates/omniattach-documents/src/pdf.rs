@@ -41,7 +41,10 @@ pub(crate) fn extract(doc: &mut Document, bytes: &[u8], options: &Options) -> Re
         )
         .map_err(|e| Error::Parse(format!("PDF page {page} spacing: {e}")))?;
         let text = pdf
-            .extract_text_with_limit(&[*page], options.limits.archive_bytes.min(usize::MAX as u64) as usize)
+            .extract_text_with_limit(
+                &[*page],
+                options.limits.archive_bytes.min(usize::MAX as u64) as usize,
+            )
             .map_err(|e| Error::Parse(format!("PDF page {page}: {e}")))?;
         if !text.trim().is_empty() {
             doc.paragraph(BlockKind::Paragraph, text.trim_end().into(), span);
