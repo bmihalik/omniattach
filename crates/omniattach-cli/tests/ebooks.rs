@@ -3,10 +3,17 @@ use serde_json::Value;
 use std::process::{Command, Output};
 
 fn run(args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_omniattach")).args(args).output().unwrap()
+    Command::new(env!("CARGO_BIN_EXE_omniattach"))
+        .args(args)
+        .output()
+        .unwrap()
 }
 fn success(output: &Output) -> Value {
-    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     serde_json::from_slice(&output.stdout).unwrap()
 }
 fn fixture(version: u32, encrypted: bool) -> Vec<u8> {
@@ -42,14 +49,32 @@ fn probe_plan_and_markdown_export_work_without_external_permission() {
         assert_eq!(probe["detection"]["basis"], "extension");
         let plan = success(&run(&["plan", p, "--goal", "markdown"]));
         assert_eq!(plan["plan"]["route"]["id"], "documents");
-        let converted = success(&run(&["convert", p, "--goal", "markdown", "--output", output.to_str().unwrap()]));
+        let converted = success(&run(&[
+            "convert",
+            p,
+            "--goal",
+            "markdown",
+            "--output",
+            output.to_str().unwrap(),
+        ]));
         assert_eq!(converted["manifest"]["route"]["id"], "documents");
         assert!(output.join("manifest.json").is_file());
-        assert!(std::fs::read_to_string(output.join("document.md")).unwrap().contains("Hello ebook CLI"));
-        let document: Value = serde_json::from_slice(&std::fs::read(output.join("document.json")).unwrap()).unwrap();
+        assert!(
+            std::fs::read_to_string(output.join("document.md"))
+                .unwrap()
+                .contains("Hello ebook CLI")
+        );
+        let document: Value =
+            serde_json::from_slice(&std::fs::read(output.join("document.json")).unwrap()).unwrap();
         assert_eq!(document["format"], extension);
         if extension == "azw3" {
-            assert!(document["diagnostics"].as_array().unwrap().iter().any(|d| d["code"] == "AZW3_EXPERIMENTAL_PROJECTION"));
+            assert!(
+                document["diagnostics"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|d| d["code"] == "AZW3_EXPERIMENTAL_PROJECTION")
+            );
         }
     }
 }
@@ -59,7 +84,14 @@ fn explicit_format_accepts_renamed_input() {
     let input = dir.path().join("book.bin");
     std::fs::write(&input, fixture(8, false)).unwrap();
     let output = dir.path().join("export");
-    success(&run(&["convert", input.to_str().unwrap(), "--format", "azw3", "--output", output.to_str().unwrap()]));
+    success(&run(&[
+        "convert",
+        input.to_str().unwrap(),
+        "--format",
+        "azw3",
+        "--output",
+        output.to_str().unwrap(),
+    ]));
     assert!(output.join("document.json").is_file());
 }
 #[test]
@@ -69,7 +101,12 @@ fn malformed_and_encrypted_ebooks_fail_without_export() {
         let input = dir.path().join("book.azw3");
         let output = dir.path().join("export");
         std::fs::write(&input, data).unwrap();
-        let result = run(&["convert", input.to_str().unwrap(), "--output", output.to_str().unwrap()]);
+        let result = run(&[
+            "convert",
+            input.to_str().unwrap(),
+            "--output",
+            output.to_str().unwrap(),
+        ]);
         assert!(!result.status.success());
         assert!(result.stdout.is_empty());
         let error: Value = serde_json::from_slice(&result.stderr).unwrap();

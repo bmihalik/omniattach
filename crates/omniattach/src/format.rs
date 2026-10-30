@@ -202,7 +202,9 @@ pub fn detect_prefix(bytes: &[u8], extension: &str) -> Detection {
         ));
     }
     if matches!(format, Format::Mobi | Format::Azw3) {
-        warnings.push("MOBI/AZW3 is extension-hinted; ebook records are validated during conversion".into());
+        warnings.push(
+            "MOBI/AZW3 is extension-hinted; ebook records are validated during conversion".into(),
+        );
     }
     Detection {
         format,
@@ -232,17 +234,30 @@ mod tests {
         let mislabeled = detect_prefix(ole, "txt");
         assert_eq!(mislabeled.format, Format::Unknown);
         assert_eq!(mislabeled.basis, DetectionBasis::Unknown);
-        assert!(mislabeled.warnings.iter().any(|w| w.contains("OLE CFBF signature conflicts")));
+        assert!(
+            mislabeled
+                .warnings
+                .iter()
+                .any(|w| w.contains("OLE CFBF signature conflicts"))
+        );
     }
 
     #[test]
     fn cfbf_stream_names_override_a_wrong_extension() {
         let mut bytes = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1".to_vec();
-        bytes.extend("PowerPoint Document".encode_utf16().flat_map(u16::to_le_bytes));
+        bytes.extend(
+            "PowerPoint Document"
+                .encode_utf16()
+                .flat_map(u16::to_le_bytes),
+        );
         let d = detect_prefix(&bytes, "doc");
         assert_eq!(d.format, Format::Ppt);
         assert_eq!(d.basis, DetectionBasis::Signature);
-        assert!(d.warnings.iter().any(|w| w.contains("differs from extension hint")));
+        assert!(
+            d.warnings
+                .iter()
+                .any(|w| w.contains("differs from extension hint"))
+        );
     }
 
     #[test]
