@@ -186,8 +186,10 @@ impl<'a> Font<'a> {
     fn advance(&self, bytes: &[u8], state: &State<'_>) -> f64 {
         let codes: Vec<u32> = if self.cid {
             bytes
-                .chunks_exact(2)
-                .map(|c| u32::from(u16::from_be_bytes([c[0], c[1]])))
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|c| u32::from(u16::from_be_bytes(*c)))
                 .collect()
         } else {
             bytes.iter().map(|c| u32::from(*c)).collect()
