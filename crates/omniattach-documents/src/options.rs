@@ -22,30 +22,27 @@ impl Default for Limits {
         }
     }
 }
-
-/// Recognizes text on one image-only PDF page. Receives the one-based page number and returns plain text; empty text means nothing was recognized.
+/// Recognizes one image-only PDF page, receiving its one-based number.
 pub type PdfOcrFn = dyn Fn(u32) -> crate::Result<String> + Send + Sync;
-
-/// Per-page OCR callback for PDF pages that have no extractable text.
 #[derive(Clone)]
 pub struct PdfOcr(pub Arc<PdfOcrFn>);
-
 impl std::fmt::Debug for PdfOcr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("PdfOcr(..)")
     }
 }
-
 #[derive(Debug, Clone)]
 pub struct Options {
     pub limits: Limits,
-    /// Explicit fallback encoding label, e.g. `windows-1250`. Default: strict UTF-8/BOM.
+    /// Explicit fallback encoding label; default is strict UTF-8/BOM.
     pub encoding: Option<String>,
     pub csv_has_headers: bool,
     pub csv_delimiter: Option<u8>,
     pub xml_table: Option<XmlTableSpec>,
-    /// OCR for PDF pages without extractable text. None means such pages are only reported.
+    /// OCR for otherwise empty PDF pages.
     pub pdf_ocr: Option<PdfOcr>,
+    /// Estimated maximum tokens in a joined line-end word. Default 6; 0 disables.
+    pub dehyphenate_max_tokens: usize,
 }
 impl Default for Options {
     fn default() -> Self {
@@ -56,6 +53,7 @@ impl Default for Options {
             csv_delimiter: None,
             xml_table: None,
             pdf_ocr: None,
+            dehyphenate_max_tokens: 6,
         }
     }
 }

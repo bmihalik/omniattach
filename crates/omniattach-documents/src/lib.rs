@@ -7,6 +7,7 @@
 //! assert!(document.to_markdown().contains("# Notes"));
 //! # Ok::<(), omniattach_documents::Error>(())
 //! ```
+pub mod dehyphenate;
 #[cfg(feature = "mobi")]
 mod ebook;
 mod error;
@@ -54,9 +55,7 @@ pub enum Format {
     Azw3,
     Pdf,
 }
-
-/// Extension-based routing with package-signature validation for archive formats.
-/// This is not a general content-type sniffer.
+/// Extension routing, not a general MIME sniffer. Package readers validate content.
 pub fn detect_format(name: &str) -> Result<Format> {
     let file = Path::new(name)
         .file_name()
@@ -94,7 +93,6 @@ pub fn detect_format(name: &str) -> Result<Format> {
         _ => return Err(Error::UnsupportedFormat(extension)),
     })
 }
-
 pub fn extract(path: impl AsRef<Path>, options: &Options) -> Result<Document> {
     let path = path.as_ref();
     let mut bytes = Vec::new();
@@ -106,7 +104,7 @@ pub fn extract(path: impl AsRef<Path>, options: &Options) -> Result<Document> {
 pub fn extract_bytes(name: &str, bytes: &[u8], options: &Options) -> Result<Document> {
     extract_as(name, bytes, detect_format(name)?, options)
 }
-/// Explicit override useful for extensionless inputs. Never writes beside the input.
+/// Explicit format override. Never writes beside the input.
 pub fn extract_as(name: &str, bytes: &[u8], format: Format, options: &Options) -> Result<Document> {
     if bytes.len() > options.limits.input_bytes {
         return Err(Error::LimitExceeded("input bytes".into()));
@@ -229,9 +227,9 @@ pub fn extract_as(name: &str, bytes: &[u8], format: Format, options: &Options) -
     if cells > options.limits.cells {
         return Err(Error::LimitExceeded("total cells".into()));
     }
+    dehyphenate::apply_document(&mut doc, options.dehyphenate_max_tokens);
     Ok(doc)
 }
-
 pub fn extract_xml_table(
     name: &str,
     bytes: &[u8],

@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- Move line-end de-hyphenation into omniattach-documents as a single structured-document post-extraction pass for paragraphs, list items and quotes, including OCR and cross-page PDF paragraphs. Code, headings and tables remain unchanged.
+- Add public dehyphenate_text and Stats { joined, skipped_long }; protect fenced code/table rows for direct text/Markdown helper calls.
+- Add Options::dehyphenate_max_tokens (default 6; 0 disables), facade JSON option validation in 0..=64 and CLI --dehyphenate-max-tokens. Duplicate CLI/JSON settings are errors.
+- Estimate joined words at four ASCII or three non-ASCII characters per token; preserve uppercase continuations, dashes, blank-line boundaries and over-budget candidates. Emit DEHYPHENATED when joined/skipped-long counts are nonzero.
+- Update emitted PDF_TEXT_ONLY scope information and separate raw-line PDF tests from default de-hyphenation tests. External-backend/portable-text postprocessing is deferred; see crates/omniattach-documents/docs/DEHYPHENATION.md.
+- No package/schema version bump, publication or completed validation is asserted.
+
 ## 0.3.0 - release preparation
 
 Documents, facade and CLI target 0.3.0. Core and backends retain 0.1.0. This entry does not assert publication or completed release validation.

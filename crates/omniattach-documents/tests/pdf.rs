@@ -29,13 +29,14 @@ fn fixture(contents: &[&str], form: Option<&str>, cycle: bool) -> Vec<u8> {
     pdf.save_to(&mut bytes).unwrap();
     bytes
 }
+fn raw_options() -> Options {
+    Options {
+        dehyphenate_max_tokens: 0,
+        ..Default::default()
+    }
+}
 fn extract_pdf(contents: &[&str]) -> Document {
-    extract_bytes(
-        "lines.pdf",
-        &fixture(contents, None, false),
-        &Options::default(),
-    )
-    .unwrap()
+    extract_bytes("lines.pdf", &fixture(contents, None, false), &raw_options()).unwrap()
 }
 #[test]
 fn pdf_text_page_provenance_and_scan_diagnostic() {
@@ -50,7 +51,7 @@ fn pdf_text_page_provenance_and_scan_diagnostic() {
 }
 #[test]
 fn invalid_pdf_is_error_not_silent_empty_success() {
-    assert!(extract_bytes("a.pdf", b"not PDF", &Options::default()).is_err());
+    assert!(extract_bytes("a.pdf", b"not PDF", &raw_options()).is_err());
 }
 #[test]
 fn td_lines_paragraphs_and_line_end_hyphen_survive_markdown() {
@@ -108,19 +109,23 @@ fn forms_resources_matrix_and_saved_graphics_state() {
         Some("BT /F1 10 Tf 0 0 Td (inside) Tj ET"),
         false,
     );
-    let doc = extract_bytes("form.pdf", &bytes, &Options::default()).unwrap();
-    assert_eq!(doc.to_text(), "inside\nafter");
+    assert_eq!(
+        extract_bytes("form.pdf", &bytes, &raw_options())
+            .unwrap()
+            .to_text(),
+        "inside\nafter"
+    );
 }
 #[test]
 fn form_cycles_and_invocation_budget_fail_explicitly() {
     let bytes = fixture(&["/Fm Do"], Some("/Fm Do"), true);
-    assert!(extract_bytes("cycle.pdf", &bytes, &Options::default()).is_err());
+    assert!(extract_bytes("cycle.pdf", &bytes, &raw_options()).is_err());
     let bytes = fixture(
         &["/Fm Do /Fm Do"],
         Some("BT /F1 10 Tf (inside) Tj ET"),
         false,
     );
-    let mut options = Options::default();
+    let mut options = raw_options();
     options.limits.archive_entries = 1;
     assert!(matches!(
         extract_bytes("forms.pdf", &bytes, &options),
@@ -130,7 +135,7 @@ fn form_cycles_and_invocation_budget_fail_explicitly() {
 #[test]
 fn ocr_success_empty_and_failure_keep_page_diagnostics() {
     let bytes = fixture(&["", "", ""], None, false);
-    let mut options = Options::default();
+    let mut options = raw_options();
     options.pdf_ocr = Some(PdfOcr(Arc::new(|p| match p {
         1 => Ok("recognized-\ntext".into()),
         2 => Ok(String::new()),
@@ -159,15 +164,13 @@ fn missing_font_is_counted_and_limits_are_not_silent() {
             .any(|d| d.code == "PDF_UNDECODED_TEXT" && d.message.starts_with("1 "))
     );
     let bytes = fixture(&["BT /F1 10 Tf (body) Tj ET"], None, false);
-    let mut options = Options::default();
+    let mut options = raw_options();
     options.limits.xml_nodes = 1;
     assert!(matches!(
         extract_bytes("limited.pdf", &bytes, &options),
         Err(Error::LimitExceeded(_))
     ));
 }
-
-// Local handoff PDFs are not redistributed. Compare independently with Poppler.
 #[test]
 #[ignore = "set OMNIATTACH_PDF_LINES_DIR; requires pdftotext and four authorized local fixtures"]
 fn handoff_pdfs_match_poppler_words_and_source_lines() {
@@ -186,7 +189,7 @@ fn handoff_pdfs_match_poppler_words_and_source_lines() {
             .unwrap();
         assert!(output.status.success(), "pdftotext failed for {name}");
         let reference = clean_reference(&String::from_utf8(output.stdout).unwrap());
-        let doc = extract(&path, &Options::default()).unwrap();
+        let doc = extract(&path, &raw_options()).unwrap();
         let body = doc
             .blocks
             .iter()
@@ -281,7 +284,6 @@ fn clean_reference(text: &str) -> String {
     }
     pages.into_iter().flatten().collect::<Vec<_>>().join("\n")
 }
-
 #[test]
 fn explicit_zero_width_and_cid_ranges_control_chunk_gaps() {
     let bytes = fixture(
@@ -308,12 +310,11 @@ fn explicit_zero_width_and_cid_ranges_control_chunk_gaps() {
     let mut bytes = Vec::new();
     pdf.save_to(&mut bytes).unwrap();
     assert_eq!(
-        extract_bytes("width.pdf", &bytes, &Options::default())
+        extract_bytes("width.pdf", &bytes, &raw_options())
             .unwrap()
             .to_text(),
         "A B"
     );
-
     let bytes = fixture(
         &[
             "BT /F1 10 Tf 72 700 Td <0001> Tj 1 0 0 1 78 700 Tm <0002> Tj 1 0 0 1 85 700 Tm <0003> Tj ET",
@@ -340,9 +341,47 @@ fn explicit_zero_width_and_cid_ranges_control_chunk_gaps() {
     let mut bytes = Vec::new();
     pdf.save_to(&mut bytes).unwrap();
     assert_eq!(
-        extract_bytes("cid.pdf", &bytes, &Options::default())
+        extract_bytes("cid.pdf", &bytes, &raw_options())
             .unwrap()
             .to_text(),
         "A BC"
     );
+}
+#[test]
+fn default_dehyphenation_joins_across_pages_and_zero_preserves_lines() {
+    let bytes = fixture(
+        &[
+            "BT /F1 12 Tf 72 700 Td (A szamito-) Tj ET",
+            "BT /F1 12 Tf 72 700 Td (gep mukodik.) Tj ET",
+        ],
+        None,
+        false,
+    );
+    let doc = extract_bytes("joined.pdf", &bytes, &Options::default()).unwrap();
+    assert_eq!(doc.to_text(), "A szamitogep\nmukodik.");
+    assert_eq!(doc.blocks.len(), 1);
+    assert_eq!(doc.blocks[0].source.page, Some(1));
+    assert!(
+        doc.diagnostics
+            .iter()
+            .any(|d| d.code == "DEHYPHENATED" && d.message.contains("Joined 1 "))
+    );
+    assert!(
+        !doc.diagnostics
+            .iter()
+            .any(|d| d.code == "PDF_TEXT_ONLY" && d.message.contains("No de-hyphenation"))
+    );
+    let raw = extract_bytes("joined.pdf", &bytes, &raw_options()).unwrap();
+    assert_eq!(raw.to_text(), "A szamito-\ngep mukodik.");
+    assert!(!raw.diagnostics.iter().any(|d| d.code == "DEHYPHENATED"));
+}
+#[test]
+fn default_dehyphenation_includes_ocr_blocks() {
+    let options = Options {
+        pdf_ocr: Some(PdfOcr(Arc::new(|_| Ok("recog-\nnized text".into())))),
+        ..Default::default()
+    };
+    let doc = extract_bytes("ocr.pdf", &fixture(&[""], None, false), &options).unwrap();
+    assert_eq!(doc.to_text(), "recognized\ntext");
+    assert_eq!(doc.blocks[0].source.path.as_deref(), Some("ocr"));
 }

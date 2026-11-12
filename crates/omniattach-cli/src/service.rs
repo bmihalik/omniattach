@@ -4,8 +4,7 @@ use std::{
     io::{Read, Write},
     path::{Path, PathBuf},
 };
-
-/// Small transport boundary; production FacadeEngine delegates conversion to omniattach.
+/// Transport boundary; the production engine delegates to the facade.
 pub trait Engine {
     fn capabilities(&self) -> Result<Value>;
     fn plan(&self, request: &EngineRequest) -> Result<Value>;
@@ -93,12 +92,27 @@ pub fn make_request(args: &RequestArgs) -> Result<EngineRequest> {
     if args.route.as_ref().is_some_and(|s| s.trim().is_empty()) {
         return Err(CliError::usage("route must not be empty"));
     }
+    let mut request_options = options(args)?;
+    if let Some(n) = args.dehyphenate_max_tokens {
+        if n > 64 {
+            return Err(CliError::usage("dehyphenate-max-tokens must be in 0..=64"));
+        }
+        let map = request_options
+            .as_object_mut()
+            .ok_or_else(|| CliError::usage("options JSON must be an object"))?;
+        if map.contains_key("dehyphenate_max_tokens") {
+            return Err(CliError::usage(
+                "--dehyphenate-max-tokens conflicts with dehyphenate_max_tokens in options JSON",
+            ));
+        }
+        map.insert("dehyphenate_max_tokens".into(), json!(n));
+    }
     Ok(EngineRequest {
         input: args.input.clone(),
         goal: args.goal.clone(),
         format: args.format.clone(),
         route: args.route.clone(),
-        options: options(args)?,
+        options: request_options,
         allow_external: args.allow_external,
         max_input_bytes: args.max_input_bytes,
         max_export_bytes: args.max_export_bytes,
@@ -179,8 +193,8 @@ fn ensure_destination(path: &Path, input: &Path) -> Result<()> {
     let parent = path
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
-        .unwrap_or_else(|| Path::new("."));
-    let parent = parent.canonicalize()?;
+        .unwrap_or_else(|| Path::new("."))
+        .canonicalize()?;
     if !parent.is_dir() {
         return Err(CliError::usage("output parent is not a directory"));
     }
@@ -254,7 +268,6 @@ pub fn dispatch(
         }
     }
 }
-/// Without facade, inspection is still usable. Conversion is explicitly unavailable.
 pub struct InspectionOnlyEngine;
 impl Engine for InspectionOnlyEngine {
     fn capabilities(&self) -> Result<Value> {
