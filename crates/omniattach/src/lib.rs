@@ -12,8 +12,6 @@
 //! expose those types in their own namespace rather than claiming binary/schema equivalence.
 #[cfg(feature = "backends")]
 mod backend_adapter;
-#[cfg(feature = "backends")]
-mod layout_adapter;
 mod bundle;
 mod context;
 mod documents_adapter;
@@ -22,6 +20,8 @@ mod documents_defaults;
 mod engine;
 mod error;
 mod format;
+#[cfg(feature = "backends")]
+mod layout_adapter;
 mod pipeline;
 mod portable;
 mod request;
