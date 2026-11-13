@@ -1,0 +1,9 @@
+# LFE-STEP-3: image output (in progress)
+
+This first commit adds BlockKind::Image { asset_id }, with Block.text used as an alt label. It does not infer a caption or visual description. Image blocks keep together and render as Markdown links to matching image assets under images/. The link renderer percent-encodes URL-sensitive filename characters, escapes the alt label separately and rejects unsafe/nonlocal asset paths. Missing/invalid references produce a visible unavailable label instead of a broken link. Plain text uses an explicit image marker. Existing asset byte serialization remains unchanged.
+
+This is only the model/rendering foundation: ordinary PDF extraction still follows its current path. Native occurrence-to-block wiring, supported raster conversion, image-file saving and facade registration of image artifacts follow in later reviewed commits. Do not interpret this commit alone as completed image extraction/export. Renderer fixtures test serialization/link generation, not image decoding. Tests have not been run here.
+
+The planned lightweight native path will be opt-in, reuse STEP-2 names and content-stream occurrences, preserve supported JPEG/JP2 streams and encode basic 8-bit grayscale/RGB pixels to PNG. Unsupported masks, predictors, color spaces and composite/vector figures will be diagnosed. No external renderer/model is added by this foundation.
+
+Image-bearing native output will use the updated omniattach-documents/0.2 schema when wired; existing default output remains 0.1 in this commit. Downstream exhaustive BlockKind matches must account for Image. Release versions will need review before publishing; no crate version is bumped, no merge is performed and nothing is published here. Validate with cargo fmt --all; cargo test -p omniattach-documents --test image_rendering; cargo test --workspace --all-features; cargo check --workspace --all-features --all-targets.
