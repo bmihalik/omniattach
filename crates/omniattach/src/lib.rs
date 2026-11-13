@@ -6,14 +6,14 @@ mod context;
 mod documents_adapter;
 #[cfg(feature = "documents")]
 mod documents_defaults;
-#[cfg(feature = "documents")]
-mod pdf_images_adapter;
 mod engine;
 mod error;
 mod fallback;
 mod format;
 #[cfg(feature = "backends")]
 mod layout_adapter;
+#[cfg(feature = "documents")]
+mod pdf_images_adapter;
 mod pipeline;
 mod portable;
 mod request;

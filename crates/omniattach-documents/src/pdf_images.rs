@@ -1,5 +1,8 @@
 //! Explicit image-bearing projection; independent of canonical PDF extraction.
-use crate::{BlockKind, Diagnostic, Document, Error, ExtractedAsset, Options, PdfElementKind, Result, SourceSpan};
+use crate::{
+    BlockKind, Diagnostic, Document, Error, ExtractedAsset, Options, PdfElementKind, Result,
+    SourceSpan,
+};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 #[path = "pdf_raster.rs"]
@@ -18,33 +21,55 @@ mod raster;
 pub fn extract_pdf_with_images(name: &str, bytes: &[u8], options: &Options) -> Result<Document> {
     let inspection = crate::inspect_pdf_bytes(name, bytes, options)?;
     let plan = inspection.naming_plan()?;
-    let pdf = lopdf::Document::load_mem_with_options(bytes, lopdf::LoadOptions {
-        max_decompressed_size: Some(options.limits.archive_bytes.min(usize::MAX as u64) as usize),
-        ..Default::default()
-    }).map_err(|e| Error::Parse(format!("PDF image projection: {e}")))?;
+    let pdf = lopdf::Document::load_mem_with_options(
+        bytes,
+        lopdf::LoadOptions {
+            max_decompressed_size: Some(
+                options.limits.archive_bytes.min(usize::MAX as u64) as usize
+            ),
+            ..Default::default()
+        },
+    )
+    .map_err(|e| Error::Parse(format!("PDF image projection: {e}")))?;
     if pdf.is_encrypted() {
         return Err(Error::InvalidInput("encrypted PDF is unsupported".into()));
     }
     let mut doc = Document {
         schema_version: "omniattach-documents/0.2".into(),
-        source: inspection.source.clone(), title: None, format: "pdf".into(),
-        extractor: format!("omniattach-documents/{}/pdf-images", env!("CARGO_PKG_VERSION")),
-        blocks: Vec::new(), tables: Vec::new(), assets: Vec::new(),
+        source: inspection.source.clone(),
+        title: None,
+        format: "pdf".into(),
+        extractor: format!(
+            "omniattach-documents/{}/pdf-images",
+            env!("CARGO_PKG_VERSION")
+        ),
+        blocks: Vec::new(),
+        tables: Vec::new(),
+        assets: Vec::new(),
         diagnostics: inspection.diagnostics.clone(),
     };
-    let names: BTreeMap<_, _> = plan.elements().iter().map(|n| (n.element_sequence(), n)).collect();
+    let names: BTreeMap<_, _> = plan
+        .elements()
+        .iter()
+        .map(|n| (n.element_sequence(), n))
+        .collect();
     let mut asset_ids: BTreeMap<lopdf::ObjectId, String> = BTreeMap::new();
     let mut asset_bytes = 0u64;
     let mut decoded_left = options.limits.archive_bytes;
     for element in &inspection.elements {
         let span = SourceSpan {
             page: Some(element.anchor.page),
-            path: Some(format!("content-operation {} forms {:?}", element.anchor.operation_visit, element.anchor.form_path)),
+            path: Some(format!(
+                "content-operation {} forms {:?}",
+                element.anchor.operation_visit, element.anchor.form_path
+            )),
             ..Default::default()
         };
         let (kind, text) = match element.kind {
             PdfElementKind::Text => {
-                let Some(text) = element.text.as_ref().filter(|s| !s.is_empty()) else { continue; };
+                let Some(text) = element.text.as_ref().filter(|s| !s.is_empty()) else {
+                    continue;
+                };
                 (BlockKind::Paragraph, text.clone())
             }
             PdfElementKind::Image => {
@@ -58,14 +83,21 @@ pub fn extract_pdf_with_images(name: &str, bytes: &[u8], options: &Options) -> R
                     let stream = match pdf.get_object(id) {
                         Ok(lopdf::Object::Stream(s)) => s,
                         _ => {
-                            skipped(&mut doc, &span, "image XObject did not resolve to a stream".into());
+                            skipped(
+                                &mut doc,
+                                &span,
+                                "image XObject did not resolve to a stream".into(),
+                            );
                             continue;
                         }
                     };
                     if doc.assets.len() >= options.limits.archive_entries {
                         return Err(Error::LimitExceeded("PDF image count".into()));
                     }
-                    let available = options.limits.archive_bytes.checked_sub(asset_bytes)
+                    let available = options
+                        .limits
+                        .archive_bytes
+                        .checked_sub(asset_bytes)
                         .ok_or_else(|| Error::LimitExceeded("PDF image bytes".into()))?;
                     let encoded = match raster::extract(stream, &mut decoded_left, available)? {
                         raster::ImageData::Encoded(image) => image,
@@ -74,27 +106,40 @@ pub fn extract_pdf_with_images(name: &str, bytes: &[u8], options: &Options) -> R
                             continue;
                         }
                     };
-                    let next_bytes = asset_bytes.checked_add(encoded.bytes.len() as u64)
+                    let next_bytes = asset_bytes
+                        .checked_add(encoded.bytes.len() as u64)
                         .filter(|n| *n <= options.limits.archive_bytes)
                         .ok_or_else(|| Error::LimitExceeded("PDF image bytes".into()))?;
-                    let named = names.get(&element.sequence)
+                    let named = names
+                        .get(&element.sequence)
                         .ok_or_else(|| Error::InvalidInput("missing image naming entry".into()))?;
                     let asset_id = format!("{}:a{}", doc.source.sha256, doc.assets.len() + 1);
                     let source = SourceSpan {
-                        path: Some(format!("object {} {}; {}", id.0, id.1, span.path.as_deref().unwrap_or(""))),
+                        path: Some(format!(
+                            "object {} {}; {}",
+                            id.0,
+                            id.1,
+                            span.path.as_deref().unwrap_or("")
+                        )),
                         ..span.clone()
                     };
                     doc.assets.push(ExtractedAsset {
-                        id: asset_id.clone(), filename: named.image_path(encoded.extension)?,
+                        id: asset_id.clone(),
+                        filename: named.image_path(encoded.extension)?,
                         media_type: encoded.media_type.into(),
                         sha256: format!("{:x}", Sha256::digest(&encoded.bytes)),
-                        byte_length: encoded.bytes.len(), bytes: encoded.bytes, source,
+                        byte_length: encoded.bytes.len(),
+                        bytes: encoded.bytes,
+                        source,
                     });
                     asset_bytes = next_bytes;
                     asset_ids.insert(id, asset_id.clone());
                     asset_id
                 };
-                (BlockKind::Image { asset_id }, format!("Image occurrence {}", element.sequence))
+                (
+                    BlockKind::Image { asset_id },
+                    format!("Image occurrence {}", element.sequence),
+                )
             }
             _ => continue,
         };
@@ -111,5 +156,9 @@ pub fn extract_pdf_with_images(name: &str, bytes: &[u8], options: &Options) -> R
     Ok(doc)
 }
 fn skipped(doc: &mut Document, span: &SourceSpan, message: String) {
-    doc.diagnostics.push(Diagnostic { code: "PDF_IMAGE_SKIPPED".into(), message, source: Some(span.clone()) });
+    doc.diagnostics.push(Diagnostic {
+        code: "PDF_IMAGE_SKIPPED".into(),
+        message,
+        source: Some(span.clone()),
+    });
 }
