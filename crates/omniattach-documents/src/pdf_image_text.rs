@@ -10,17 +10,30 @@ pub(super) struct Assembler<'a> {
     output_bytes: u64,
 }
 impl<'a> Assembler<'a> {
-    pub fn append(&mut self, doc: &mut Document, element: &'a PdfElement, options: &Options) -> Result<()> {
-        if self.pending.first().is_some_and(|first| first.anchor.page != element.anchor.page || first.anchor.form_path != element.anchor.form_path) {
+    pub fn append(
+        &mut self,
+        doc: &mut Document,
+        element: &'a PdfElement,
+        options: &Options,
+    ) -> Result<()> {
+        if self.pending.first().is_some_and(|first| {
+            first.anchor.page != element.anchor.page
+                || first.anchor.form_path != element.anchor.form_path
+        }) {
             self.flush(doc, options)?;
         }
         let Some(text) = element.text.as_deref() else {
             return self.flush(doc, options);
         };
-        if text.is_empty() { return Ok(()); }
+        if text.is_empty() {
+            return Ok(());
+        }
         let geometry_ok = element.bounds.is_some_and(|b| {
-            [b.left, b.right, b.bottom, b.top].iter().all(|n| n.is_finite())
-                && b.right >= b.left && b.top > b.bottom
+            [b.left, b.right, b.bottom, b.top]
+                .iter()
+                .all(|n| n.is_finite())
+                && b.right >= b.left
+                && b.top > b.bottom
         });
         if !geometry_ok {
             self.flush(doc, options)?;
@@ -31,13 +44,26 @@ impl<'a> Assembler<'a> {
         Ok(())
     }
     pub fn flush(&mut self, doc: &mut Document, options: &Options) -> Result<()> {
-        let Some(first) = self.pending.first().copied() else { return Ok(()); };
+        let Some(first) = self.pending.first().copied() else {
+            return Ok(());
+        };
         let last = self.pending.last().copied().unwrap_or(first);
         let source = span(first, last);
-        let runs: Vec<_> = self.pending.iter().filter_map(|e| {
-            let bounds = e.bounds?;
-            Some(Run { x: bounds.left, end: bounds.right, y: bounds.bottom, height: (bounds.top - bounds.bottom).max(1.), text: e.text.as_deref()?, space: e.word_gap_before })
-        }).collect();
+        let runs: Vec<_> = self
+            .pending
+            .iter()
+            .filter_map(|e| {
+                let bounds = e.bounds?;
+                Some(Run {
+                    x: bounds.left,
+                    end: bounds.right,
+                    y: bounds.bottom,
+                    height: (bounds.top - bounds.bottom).max(1.),
+                    text: e.text.as_deref()?,
+                    space: e.word_gap_before,
+                })
+            })
+            .collect();
         let joined = build_lines(&runs).join("\n");
         self.pending.clear();
         for paragraph in joined.split("\n\n").filter(|s| !s.trim().is_empty()) {
@@ -45,8 +71,16 @@ impl<'a> Assembler<'a> {
         }
         Ok(())
     }
-    fn emit(&mut self, doc: &mut Document, text: String, source: SourceSpan, options: &Options) -> Result<()> {
-        self.output_bytes = self.output_bytes.checked_add(text.len() as u64)
+    fn emit(
+        &mut self,
+        doc: &mut Document,
+        text: String,
+        source: SourceSpan,
+        options: &Options,
+    ) -> Result<()> {
+        self.output_bytes = self
+            .output_bytes
+            .checked_add(text.len() as u64)
             .filter(|n| *n <= options.limits.archive_bytes)
             .ok_or_else(|| Error::LimitExceeded("PDF assembled text bytes".into()))?;
         if doc.blocks.len() >= options.limits.blocks {
@@ -59,11 +93,21 @@ impl<'a> Assembler<'a> {
 fn span(first: &PdfElement, last: &PdfElement) -> SourceSpan {
     SourceSpan {
         page: Some(first.anchor.page),
-        path: Some(format!("content-operations {}..={} forms {:?}; segment provenance", first.anchor.operation_visit, last.anchor.operation_visit, first.anchor.form_path)),
+        path: Some(format!(
+            "content-operations {}..={} forms {:?}; segment provenance",
+            first.anchor.operation_visit, last.anchor.operation_visit, first.anchor.form_path
+        )),
         ..Default::default()
     }
 }
-struct Run<'a> { x: f64, end: f64, y: f64, height: f64, text: &'a str, space: bool }
+struct Run<'a> {
+    x: f64,
+    end: f64,
+    y: f64,
+    height: f64,
+    text: &'a str,
+    space: bool,
+}
 fn build_lines(runs: &[Run<'_>]) -> Vec<String> {
     let mut gaps = BTreeMap::<i64, usize>::new();
     for pair in runs.windows(2) {
@@ -73,7 +117,10 @@ fn build_lines(runs: &[Run<'_>]) -> Vec<String> {
             *gaps.entry((dy * 2.).round() as i64).or_default() += 1;
         }
     }
-    let common = gaps.iter().max_by(|(a, n), (b, m)| n.cmp(m).then_with(|| b.cmp(a))).map(|(g, _)| *g as f64 / 2.);
+    let common = gaps
+        .iter()
+        .max_by(|(a, n), (b, m)| n.cmp(m).then_with(|| b.cmp(a)))
+        .map(|(g, _)| *g as f64 / 2.);
     let mut out = String::new();
     let mut last: Option<&Run<'_>> = None;
     for run in runs {
@@ -86,21 +133,33 @@ fn build_lines(runs: &[Run<'_>]) -> Vec<String> {
                 out.truncate(len);
                 if !out.is_empty() {
                     out.push('\n');
-                    if dy > 2.6 * size || common.is_some_and(|g| dy > 1.45 * g) { out.push('\n'); }
+                    if dy > 2.6 * size || common.is_some_and(|g| dy > 1.45 * g) {
+                        out.push('\n');
+                    }
                 }
                 new_line = true;
-            } else if run.x - prev.end > 0.18 * size { push_space(&mut out); }
+            } else if run.x - prev.end > 0.18 * size {
+                push_space(&mut out);
+            }
         }
-        if run.space && !new_line { push_space(&mut out); }
+        if run.space && !new_line {
+            push_space(&mut out);
+        }
         for c in run.text.chars() {
-            if c.is_whitespace() { push_space(&mut out); } else if !c.is_control() { out.push(c); }
+            if c.is_whitespace() {
+                push_space(&mut out);
+            } else if !c.is_control() {
+                out.push(c);
+            }
         }
         last = Some(run);
     }
     out.lines().map(|l| l.trim_end().to_owned()).collect()
 }
 fn push_space(out: &mut String) {
-    if !out.is_empty() && !out.ends_with([' ', '\n']) { out.push(' '); }
+    if !out.is_empty() && !out.ends_with([' ', '\n']) {
+        out.push(' ');
+    }
 }
 
 #[cfg(test)]
@@ -109,23 +168,50 @@ mod tests {
     use crate::{PdfBounds, PdfElementAnchor, PdfElementKind};
     fn element(text: Option<&str>, x: f64, y: f64, operation: usize) -> PdfElement {
         PdfElement {
-            sequence: operation, kind: PdfElementKind::Text,
-            anchor: PdfElementAnchor { page: 1, operation_visit: operation, form_path: Vec::new(), object_id: None, resource_name: None },
-            bounds: Some(PdfBounds { left: x, right: x + 12., bottom: y, top: y + 12., estimated: true }),
-            text: text.map(str::to_owned), word_gap_before: false, pixel_size: None, derived_from: Vec::new(), evidence: Vec::new(),
+            sequence: operation,
+            kind: PdfElementKind::Text,
+            anchor: PdfElementAnchor {
+                page: 1,
+                operation_visit: operation,
+                form_path: Vec::new(),
+                object_id: None,
+                resource_name: None,
+            },
+            bounds: Some(PdfBounds {
+                left: x,
+                right: x + 12.,
+                bottom: y,
+                top: y + 12.,
+                estimated: true,
+            }),
+            text: text.map(str::to_owned),
+            word_gap_before: false,
+            pixel_size: None,
+            derived_from: Vec::new(),
+            evidence: Vec::new(),
         }
     }
-    fn document() -> Document { crate::extract_bytes("empty.txt", b"", &Options::default()).unwrap() }
+    fn document() -> Document {
+        crate::extract_bytes("empty.txt", b"", &Options::default()).unwrap()
+    }
     #[test]
     fn adjacent_fragments_join_and_geometry_or_tj_hint_adds_word_gap() {
-        for (x, gap, expected) in [(12., false, "before"), (20., false, "be fore"), (12., true, "be fore")] {
+        for (x, gap, expected) in [
+            (12., false, "before"),
+            (20., false, "be fore"),
+            (12., true, "be fore"),
+        ] {
             let one = element(Some("be"), 0., 100., 1);
             let mut two = element(Some("fore"), x, 100., 2);
             two.word_gap_before = gap;
             let mut doc = document();
             let mut assembler = Assembler::default();
-            assembler.append(&mut doc, &one, &Options::default()).unwrap();
-            assembler.append(&mut doc, &two, &Options::default()).unwrap();
+            assembler
+                .append(&mut doc, &one, &Options::default())
+                .unwrap();
+            assembler
+                .append(&mut doc, &two, &Options::default())
+                .unwrap();
             assembler.flush(&mut doc, &Options::default()).unwrap();
             assert_eq!(doc.blocks.len(), 1);
             assert_eq!(doc.blocks[0].text, expected);
@@ -133,13 +219,32 @@ mod tests {
     }
     #[test]
     fn ordinary_lines_and_large_paragraph_gap_keep_text_order_and_segment_provenance() {
-        let elements = [element(Some("one"), 0., 100., 1), element(Some("two"), 0., 86., 2), element(Some("three"), 0., 46., 3)];
+        let elements = [
+            element(Some("one"), 0., 100., 1),
+            element(Some("two"), 0., 86., 2),
+            element(Some("three"), 0., 46., 3),
+        ];
         let mut doc = document();
         let mut assembler = Assembler::default();
-        for e in &elements { assembler.append(&mut doc, e, &Options::default()).unwrap(); }
+        for e in &elements {
+            assembler.append(&mut doc, e, &Options::default()).unwrap();
+        }
         assembler.flush(&mut doc, &Options::default()).unwrap();
-        assert_eq!(doc.blocks.iter().map(|b| b.text.as_str()).collect::<Vec<_>>(), vec!["one\ntwo", "three"]);
-        assert!(doc.blocks[0].source.path.as_deref().unwrap().contains("1..=3"));
+        assert_eq!(
+            doc.blocks
+                .iter()
+                .map(|b| b.text.as_str())
+                .collect::<Vec<_>>(),
+            vec!["one\ntwo", "three"]
+        );
+        assert!(
+            doc.blocks[0]
+                .source
+                .path
+                .as_deref()
+                .unwrap()
+                .contains("1..=3")
+        );
     }
     #[test]
     fn pages_forms_and_undecodable_runs_are_hard_boundaries() {
@@ -147,16 +252,34 @@ mod tests {
             let one = element(Some("left"), 0., 100., 1);
             let mut boundary = element(None, 12., 100., 2);
             let mut two = element(Some("right"), 12., 100., 3);
-            if mode == 0 { two.anchor.page = 2; }
-            if mode == 1 { two.anchor.form_path.push((42, 0)); }
-            if mode != 2 { boundary.text = Some(String::new()); }
+            if mode == 0 {
+                two.anchor.page = 2;
+            }
+            if mode == 1 {
+                two.anchor.form_path.push((42, 0));
+            }
+            if mode != 2 {
+                boundary.text = Some(String::new());
+            }
             let mut doc = document();
             let mut assembler = Assembler::default();
-            assembler.append(&mut doc, &one, &Options::default()).unwrap();
-            assembler.append(&mut doc, &boundary, &Options::default()).unwrap();
-            assembler.append(&mut doc, &two, &Options::default()).unwrap();
+            assembler
+                .append(&mut doc, &one, &Options::default())
+                .unwrap();
+            assembler
+                .append(&mut doc, &boundary, &Options::default())
+                .unwrap();
+            assembler
+                .append(&mut doc, &two, &Options::default())
+                .unwrap();
             assembler.flush(&mut doc, &Options::default()).unwrap();
-            assert_eq!(doc.blocks.iter().map(|b| b.text.as_str()).collect::<Vec<_>>(), vec!["left", "right"]);
+            assert_eq!(
+                doc.blocks
+                    .iter()
+                    .map(|b| b.text.as_str())
+                    .collect::<Vec<_>>(),
+                vec!["left", "right"]
+            );
         }
     }
     #[test]
@@ -164,20 +287,33 @@ mod tests {
         let mut e = element(Some("raw"), 0., 100., 1);
         e.bounds = None;
         let mut doc = document();
-        Assembler::default().append(&mut doc, &e, &Options::default()).unwrap();
+        Assembler::default()
+            .append(&mut doc, &e, &Options::default())
+            .unwrap();
         assert_eq!(doc.blocks[0].text, "raw");
-        assert!(doc.diagnostics.iter().any(|d| d.code == "LFE_TEXT_GEOMETRY_FALLBACK"));
+        assert!(
+            doc.diagnostics
+                .iter()
+                .any(|d| d.code == "LFE_TEXT_GEOMETRY_FALLBACK")
+        );
     }
     #[test]
     fn generated_text_and_block_limits_are_enforced() {
         let e = element(Some("long text"), 0., 100., 1);
         for bytes_limit in [true, false] {
             let mut options = Options::default();
-            if bytes_limit { options.limits.archive_bytes = 2; } else { options.limits.blocks = 0; }
+            if bytes_limit {
+                options.limits.archive_bytes = 2;
+            } else {
+                options.limits.blocks = 0;
+            }
             let mut doc = document();
             let mut assembler = Assembler::default();
             assembler.append(&mut doc, &e, &options).unwrap();
-            assert!(matches!(assembler.flush(&mut doc, &options), Err(Error::LimitExceeded(_))));
+            assert!(matches!(
+                assembler.flush(&mut doc, &options),
+                Err(Error::LimitExceeded(_))
+            ));
         }
     }
 }
