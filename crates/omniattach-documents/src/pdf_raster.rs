@@ -35,9 +35,7 @@ pub(super) fn extract(
             .get(b"ImageMask")
             .is_ok_and(|v| !matches!(v, Object::Boolean(false)))
     {
-        return Ok(skip(
-            "image masks or custom Decode are unsupported",
-        ));
+        return Ok(skip("image masks or custom Decode are unsupported"));
     }
     let filter = match stream.dict.get(b"Filter") {
         Err(_) => None,
@@ -53,7 +51,9 @@ pub(super) fn extract(
         }
     };
     if stream.dict.get(b"DecodeParms").is_ok() && filter != Some(b"FlateDecode") {
-        return Ok(skip("DecodeParms is supported only for direct Flate Predictor 15 rasters"));
+        return Ok(skip(
+            "DecodeParms is supported only for direct Flate Predictor 15 rasters",
+        ));
     }
     if let Some((extension, media_type)) = match filter {
         Some(b"DCTDecode") => Some(("jpg", "image/jpeg")),
@@ -113,7 +113,11 @@ pub(super) fn extract(
     };
     let predicted = match predictor::parameters(stream, width, channels) {
         Some(value) => value,
-        None => return Ok(skip("unsupported DecodeParms; expected direct Flate Predictor 15 with matching 8-bit Gray/RGB geometry")),
+        None => {
+            return Ok(skip(
+                "unsupported DecodeParms; expected direct Flate Predictor 15 with matching 8-bit Gray/RGB geometry",
+            ));
+        }
     };
     let expected = u64::from(width)
         .checked_mul(u64::from(height))
@@ -138,11 +142,24 @@ pub(super) fn extract(
         compressed.dict.remove(b"DecodeParms");
         let filtered = match compressed.get_plain_content_with_limit(inflated as usize) {
             Ok(data) if data.len() == inflated as usize => data,
-            _ => return Ok(skip("Predictor 15 Flate bytes violate the exact row-data bound")),
+            _ => {
+                return Ok(skip(
+                    "Predictor 15 Flate bytes violate the exact row-data bound",
+                ));
+            }
         };
-        match predictor::decode(&filtered, expected / height as usize, height as usize, channels as usize) {
+        match predictor::decode(
+            &filtered,
+            expected / height as usize,
+            height as usize,
+            channels as usize,
+        ) {
             Some(raw) => raw,
-            None => return Ok(skip("Predictor 15 row data has an invalid length or filter tag")),
+            None => {
+                return Ok(skip(
+                    "Predictor 15 row data has an invalid length or filter tag",
+                ));
+            }
         }
     } else if filter.is_none() {
         if stream.content.len() != expected {
@@ -211,11 +228,14 @@ impl Write for CappedOutput {
 mod tests {
     use super::*;
     fn predicted_stream() -> Stream {
-        Stream::new(lopdf::dictionary! {
-            "Width" => 2, "Height" => 2, "ColorSpace" => "DeviceGray",
-            "BitsPerComponent" => 8, "Filter" => "FlateDecode",
-            "DecodeParms" => lopdf::dictionary! {"Predictor" => 15, "Columns" => 2}
-        }, vec![120, 156, 99, 224, 18, 97, 18, 17, 1, 0, 0, 202, 0, 73])
+        Stream::new(
+            lopdf::dictionary! {
+                "Width" => 2, "Height" => 2, "ColorSpace" => "DeviceGray",
+                "BitsPerComponent" => 8, "Filter" => "FlateDecode",
+                "DecodeParms" => lopdf::dictionary! {"Predictor" => 15, "Columns" => 2}
+            },
+            vec![120, 156, 99, 224, 18, 97, 18, 17, 1, 0, 0, 202, 0, 73],
+        )
     }
     #[test]
     fn predictor_stream_to_png_round_trips_and_preserves_input() {
@@ -228,7 +248,9 @@ mod tests {
         assert_eq!(left, 0);
         assert_eq!(stream, original);
         assert_eq!(image.media_type, "image/png");
-        let mut reader = png::Decoder::new(std::io::Cursor::new(image.bytes)).read_info().unwrap();
+        let mut reader = png::Decoder::new(std::io::Cursor::new(image.bytes))
+            .read_info()
+            .unwrap();
         let mut out = vec![0; reader.output_buffer_size()];
         let frame = reader.next_frame(&mut out).unwrap();
         assert_eq!((frame.width, frame.height), (2, 2));
@@ -237,21 +259,39 @@ mod tests {
     #[test]
     fn predictor_budgets_and_unsupported_parameters_are_enforced() {
         let stream = predicted_stream();
-        assert!(matches!(extract(&stream, &mut 9, 4096), Err(Error::LimitExceeded(_))));
-        assert!(matches!(extract(&stream, &mut 10, 0), Err(Error::LimitExceeded(_))));
+        assert!(matches!(
+            extract(&stream, &mut 9, 4096),
+            Err(Error::LimitExceeded(_))
+        ));
+        assert!(matches!(
+            extract(&stream, &mut 10, 0),
+            Err(Error::LimitExceeded(_))
+        ));
         let mut left = 20;
         for _ in 0..2 {
-            assert!(matches!(extract(&stream, &mut left, 4096), Ok(ImageData::Encoded(_))));
+            assert!(matches!(
+                extract(&stream, &mut left, 4096),
+                Ok(ImageData::Encoded(_))
+            ));
         }
-        assert!(matches!(extract(&stream, &mut left, 4096), Err(Error::LimitExceeded(_))));
+        assert!(matches!(
+            extract(&stream, &mut left, 4096),
+            Err(Error::LimitExceeded(_))
+        ));
         for key in ["Mask", "SMask", "Decode"] {
             let mut bad = stream.clone();
             bad.dict.set(key, Object::Null);
-            assert!(matches!(extract(&bad, &mut 100, 4096), Ok(ImageData::Skipped(_))));
+            assert!(matches!(
+                extract(&bad, &mut 100, 4096),
+                Ok(ImageData::Skipped(_))
+            ));
         }
         let mut bad = stream.clone();
         bad.dict.set("Height", 1);
-        assert!(matches!(extract(&bad, &mut 100, 4096), Ok(ImageData::Skipped(_))));
+        assert!(matches!(
+            extract(&bad, &mut 100, 4096),
+            Ok(ImageData::Skipped(_))
+        ));
     }
     #[test]
     fn encoded_output_budget_is_enforced() {

@@ -22,7 +22,7 @@ ebooks = ["epub", "mobi", "azw3"]
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+serde_json = { version = "1", features = ["float_roundtrip"] }
 thiserror = "2"
 sha2 = "0.10"
 encoding_rs = "0.8"
