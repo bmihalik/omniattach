@@ -1,0 +1,9 @@
+# LFE-STEP-3: independently runnable audit regressions
+
+Run from the repository root with Python 3.10+: `python3 scripts/test_audit_pdf_image_export.py`. No Cargo build, PDF, private book text, external program or third-party Python package is needed. The suite creates temporary synthetic export directories and removes them afterward. Structural image bytes deliberately are not codec images.
+
+Fourteen tests cover repeated asset/link counts and omission of prose from reports, saved-byte corruption, missing files, missing Markdown occurrences, escaped alt labels/prose, missing typed asset references, invalid JSON byte arrays, artifact hash metadata, JSON/image read budgets, unsafe paths, symlinks, reference differences/source mismatch, zero-image exports, report overwrite refusal and CLI failure reporting. On platforms without symlink support the symlink case is skipped explicitly.
+
+This exact suite was executed during preparation under Python 3.12 against the unmodified audit script matching repository Git blob 8c75ea376a306598330305a3519440245aed3f58: 14 passed, 0 failed, 0 errors, 0 skipped. Python 3.10 compatibility is intended but was not separately executed. These results validate the covered audit behaviors only. They do not establish general schema validation, hostile-input sandboxing, Rust compilation, real image-codec correctness, full PDF image coverage or prose fidelity.
+
+No extractor, audit implementation, Rust test, API, dependency, lockfile, route, schema or package version changes are included. The prior mixed-text Rust implementation and operator-regression tests remain pending local validation unless separately confirmed. Real PDF visual/prose checks are still required before declaring STEP-3 complete. Nothing is merged or published by this test-only increment.
