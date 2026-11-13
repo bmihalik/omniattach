@@ -1,0 +1,13 @@
+[package]
+name = "lfe-formula-bobine"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+
+# Isolated experiment: no dependency added to the omniattach workspace.
+[workspace]
+
+[dependencies]
+bobine = "=0.9.1"
+serde_json = "1"
