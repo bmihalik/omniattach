@@ -10,7 +10,7 @@ use std::{
     collections::BTreeMap,
     fs,
     io::Read,
-    path::{Component, Path, PathBuf},
+    path::{Component, Path},
 };
 
 /// Paths are relative to the converter's out/ directory. None requires exactly one Markdown file.
