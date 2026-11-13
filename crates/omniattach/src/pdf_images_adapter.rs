@@ -9,7 +9,7 @@ impl OmniAttachBuilder {
     pub fn with_pdf_image_projection(self) -> Result<Self> {
         self.register(
             Route::new("pdf-images", vec![Format::Pdf], vec![Goal::Custom("pdf-images".into())], ExecutionKind::InProcess)
-                .described("Experimental native PDF text-run/image projection with relocatable Markdown and JPEG/JP2 assets; no OCR or visual reading-order reconstruction"),
+                .described("Experimental native PDF text-run/image projection with relocatable Markdown and JPEG/JP2/PNG assets; no OCR or visual reading-order reconstruction"),
             PdfImageConverter,
         )
     }
@@ -61,7 +61,7 @@ impl Converter for PdfImageConverter {
                 || !names.insert(asset.filename.as_str()) || !ids.insert(asset.id.as_str()) {
                 return Err(Error::InvalidOutput("unsafe or duplicate native PDF image path/id".into()));
             }
-            if !matches!(asset.media_type.as_str(), "image/jpeg" | "image/jp2")
+            if !matches!(asset.media_type.as_str(), "image/jpeg" | "image/jp2" | "image/png")
                 || asset.byte_length != asset.bytes.len()
                 || asset.sha256 != format!("{:x}", Sha256::digest(&asset.bytes)) {
                 return Err(Error::InvalidOutput("invalid native PDF image metadata".into()));

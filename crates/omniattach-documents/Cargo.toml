@@ -13,7 +13,7 @@ exclude = ["target/", ".git/"]
 [features]
 default = []
 office = ["dep:calamine", "dep:zip"]
-pdf = ["dep:lopdf", "dep:deunicode"]
+pdf = ["dep:lopdf", "dep:deunicode", "dep:png"]
 mobi = ["dep:mobi"]
 azw3 = ["mobi"]
 # EPUB currently shares the existing Office package reader.
@@ -36,6 +36,7 @@ calamine = { version = "0.37", optional = true }
 lopdf = { version = "0.46", default-features = false, optional = true }
 mobi = { version = "0.8", default-features = false, optional = true }
 deunicode = { version = "1.6", optional = true }
+png = { version = "0.17", optional = true }
 
 [dev-dependencies]
 tempfile = "3"
