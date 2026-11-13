@@ -4,6 +4,8 @@ pub mod dehyphenate;
 mod ebook;
 mod error;
 mod html;
+#[cfg(feature = "pdf")]
+mod lfe_names;
 mod model;
 #[cfg(feature = "office")]
 mod office;
@@ -18,6 +20,8 @@ mod spreadsheet;
 mod text;
 pub mod xml;
 pub use error::{Error, Result};
+#[cfg(feature = "pdf")]
+pub use lfe_names::{LfeElementName, LfeNamingPlan, lfe_document_prefix, sanitize_document_stem};
 pub use model::*;
 pub use options::{Limits, Options, PdfOcr, PdfOcrFn};
 #[cfg(feature = "pdf")]
