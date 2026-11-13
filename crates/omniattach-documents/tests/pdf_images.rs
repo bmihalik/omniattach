@@ -6,7 +6,7 @@ use sha2::{Digest, Sha256};
 fn jpeg() -> Vec<u8> {
     let hex = include_str!("fixtures/lfe-rgb.jpg.hex").trim();
     assert!(hex.len().is_multiple_of(2));
-    hex.as_bytes().chunks_exact(2).map(|p| {
+    hex.as_bytes().as_chunks::<2>().0.iter().map(|p| {
         u8::from_str_radix(std::str::from_utf8(p).unwrap(), 16).unwrap()
     }).collect()
 }
