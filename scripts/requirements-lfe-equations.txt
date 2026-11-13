@@ -1,0 +1,7 @@
+# Test-generation dependencies only. Python >=3.10. Not Rust runtime dependencies.
+# Direct versions used for the LFE-4A checkpoint; transitive dependencies are not locked.
+matplotlib==3.10.3
+reportlab==4.4.0
+pypdf==5.4.0
+Pillow==12.2.0
+pypdfium2==5.12.1
