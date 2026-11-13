@@ -3,6 +3,7 @@ pub mod dehyphenate;
 #[cfg(feature = "mobi")] mod ebook;
 mod error;
 mod html;
+#[cfg(feature = "pdf")] mod lfe_names;
 mod model;
 #[cfg(feature = "office")] mod office;
 mod options;
@@ -13,6 +14,8 @@ mod render;
 mod text;
 pub mod xml;
 pub use error::{Error, Result};
+#[cfg(feature = "pdf")]
+pub use lfe_names::{sanitize_document_stem, lfe_document_prefix, LfeElementName, LfeNamingPlan};
 pub use model::*;
 pub use options::{Limits, Options, PdfOcr, PdfOcrFn};
 #[cfg(feature = "pdf")]
