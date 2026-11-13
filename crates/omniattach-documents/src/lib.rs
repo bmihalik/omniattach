@@ -14,6 +14,8 @@ mod options;
 mod package;
 #[cfg(feature = "pdf")]
 mod pdf;
+#[cfg(feature = "pdf")]
+mod pdf_images;
 mod render;
 #[cfg(feature = "office")]
 mod spreadsheet;
@@ -29,6 +31,8 @@ pub use pdf::{
     PdfBounds, PdfElement, PdfElementAnchor, PdfElementKind, PdfInspection, inspect_pdf,
     inspect_pdf_bytes,
 };
+#[cfg(feature = "pdf")]
+pub use pdf_images::extract_pdf_with_images;
 pub use render::CsvOptions;
 use sha2::{Digest, Sha256};
 use std::{fs::File, io::Read, path::Path};
