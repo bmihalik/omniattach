@@ -11,3 +11,5 @@ publish = false
 [dependencies]
 bobine = "=0.9.1"
 serde_json = "1"
+# Bobine/embroider use the rc.13 API; newer ORT prereleases can break it.
+ort = { version = "=2.0.0-rc.13", default-features = false, features = ["load-dynamic"] }
