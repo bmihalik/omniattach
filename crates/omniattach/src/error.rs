@@ -1,7 +1,5 @@
-use crate::{Format, Goal};
-
+use crate::{FallbackReport, Format, Goal};
 pub type Result<T> = std::result::Result<T, Error>;
-
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("I/O: {0}")]
@@ -41,4 +39,15 @@ pub enum Error {
     #[cfg(feature = "backends")]
     #[error(transparent)]
     Backend(#[from] omniattach_backends::Error),
+    #[cfg(feature = "documents")]
+    #[error(transparent)]
+    Document(#[from] omniattach_documents::Error),
+    #[error("fallback candidates exhausted without an accepted result")]
+    FallbackExhausted,
+    #[error("fallback failed: {source}")]
+    Fallback {
+        report: Box<FallbackReport>,
+        #[source]
+        source: Box<Error>,
+    },
 }

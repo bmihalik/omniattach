@@ -7,7 +7,6 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 use tempfile::TempDir;
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SourceIdentity {
     pub name: String,
@@ -16,7 +15,6 @@ pub struct SourceIdentity {
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Payload {
-    /// Backend-owned schema name. No claim of a universal canonical document schema.
     pub schema: String,
     pub value: serde_json::Value,
 }
@@ -28,12 +26,10 @@ pub struct Warning {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct TextFragment {
     pub text: String,
-    /// Original converter location schema; null means no original location supplied.
     pub location: serde_json::Value,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Artifact {
-    /// Relative to the bundle artifact directory; never a path outside the bundle.
     pub path: String,
     pub media_type: String,
     pub bytes: u64,
@@ -57,8 +53,6 @@ impl FacadeManifest {
         Ok(serde_json::to_string_pretty(self)?)
     }
 }
-
-/// Converter declares an already-written file under StagedInput::output_dir.
 #[derive(Debug, Clone)]
 pub struct PendingArtifact {
     pub path: String,
@@ -100,7 +94,6 @@ impl ConversionData {
         });
     }
 }
-
 pub(crate) fn relative_file(root: &Path, path: &str) -> Result<PathBuf> {
     if path.is_empty()
         || path.contains('\\')
@@ -139,8 +132,8 @@ pub(crate) fn validate_artifacts(
     let mut artifacts = Vec::new();
     for item in pending {
         ctx.check()?;
-        let first = Path::new(&item.path).components().next();
-        if first == Some(Component::Normal(std::ffi::OsStr::new("manifest.json")))
+        if Path::new(&item.path).components().next()
+            == Some(Component::Normal(std::ffi::OsStr::new("manifest.json")))
             || !names.insert(item.path.clone())
         {
             return Err(Error::InvalidOutput(
@@ -164,8 +157,7 @@ pub(crate) fn validate_artifacts(
     }
     Ok(artifacts)
 }
-
-/// Facade-owned scratch data. Artifacts live until drop or explicit export.
+/// Owns scratch data; declared artifacts survive until drop or export.
 #[derive(Debug)]
 pub struct FacadeBundle {
     manifest: FacadeManifest,
@@ -177,6 +169,13 @@ impl FacadeBundle {
             manifest,
             directory,
         }
+    }
+    pub(crate) fn manifest_mut(&mut self) -> &mut FacadeManifest {
+        &mut self.manifest
+    }
+    pub(crate) fn discard(self) -> Result<()> {
+        self.directory.close()?;
+        Ok(())
     }
     pub fn manifest(&self) -> &FacadeManifest {
         &self.manifest
@@ -207,8 +206,7 @@ impl FacadeBundle {
             .collect::<Vec<_>>()
             .join("\n\n")
     }
-    /// Copies only declared artifacts, then manifest.json, to a NEW directory.
-    /// Synchronous, not atomic, not cancellable; failure attempts to remove the partial directory.
+    /// Export declared assets and manifest to a NEW directory; synchronous, not atomic.
     pub fn export(&self, destination: impl AsRef<Path>) -> Result<()> {
         let destination = destination.as_ref();
         fs::create_dir(destination)?;
@@ -224,8 +222,7 @@ impl FacadeBundle {
                     .create_new(true)
                     .open(output)?;
                 let mut file = File::open(source)?;
-                let copied = std::io::copy(&mut file, &mut writer)?;
-                if copied != artifact.bytes {
+                if std::io::copy(&mut file, &mut writer)? != artifact.bytes {
                     return Err(Error::InvalidOutput(
                         "artifact changed after conversion".into(),
                     ));
@@ -240,7 +237,6 @@ impl FacadeBundle {
         result
     }
 }
-
 #[cfg(feature = "backends")]
 pub(crate) fn copy_checked(
     source: &Path,

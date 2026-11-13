@@ -17,11 +17,8 @@ impl DocumentConverter {
         Self { runner }
     }
 }
-fn document_error(error: impl std::fmt::Display) -> Error {
-    Error::Converter {
-        route: "documents".into(),
-        message: error.to_string(),
-    }
+fn document_error(error: omniattach_documents::Error) -> Error {
+    Error::Document(error)
 }
 fn document_format(format: Format) -> Option<DocFormat> {
     Some(match format {
@@ -48,7 +45,6 @@ struct DocumentConfig {
     dpi: u32,
     dehyphenate_max_tokens: usize,
 }
-/// Accepts null or an object containing OCR and de-hyphenation settings.
 fn parse_document_options(options: &serde_json::Value) -> Result<DocumentConfig> {
     let mut cfg = DocumentConfig {
         enabled: false,
@@ -69,12 +65,9 @@ fn parse_document_options(options: &serde_json::Value) -> Result<DocumentConfig>
                         cfg.language = lang.into(); language_or_dpi_set = true;
                     }
                     "ocr_dpi" => {
-                        cfg.dpi = value.as_u64().and_then(|n| u32::try_from(n).ok()).filter(|d| (72..=1200).contains(d)).ok_or_else(|| Error::Configuration("ocr_dpi option must be an integer in 72..=1200".into()))?;
-                        language_or_dpi_set = true;
+                        cfg.dpi = value.as_u64().and_then(|n| u32::try_from(n).ok()).filter(|d| (72..=1200).contains(d)).ok_or_else(|| Error::Configuration("ocr_dpi option must be an integer in 72..=1200".into()))?; language_or_dpi_set = true;
                     }
-                    "dehyphenate_max_tokens" => {
-                        cfg.dehyphenate_max_tokens = value.as_u64().filter(|n| *n <= 64).and_then(|n| usize::try_from(n).ok()).ok_or_else(|| Error::Configuration("dehyphenate_max_tokens option must be an integer in 0..=64".into()))?;
-                    }
+                    "dehyphenate_max_tokens" => cfg.dehyphenate_max_tokens = value.as_u64().filter(|n| *n <= 64).and_then(|n| usize::try_from(n).ok()).ok_or_else(|| Error::Configuration("dehyphenate_max_tokens option must be an integer in 0..=64".into()))?,
                     _ => return Err(Error::Configuration("document routes accept only ocr, ocr_language, ocr_dpi and dehyphenate_max_tokens; call omniattach-documents directly for mappings".into())),
                 }
             }
@@ -121,14 +114,25 @@ impl Converter for DocumentConverter {
             let dpi = ocr.dpi;
             let words_out = ocr_words.clone();
             let runner = self.runner.clone();
+            let job = context.clone();
             Some(omniattach_documents::PdfOcr(std::sync::Arc::new(
                 move |page: u32| -> omniattach_documents::Result<String> {
-                    let ctx = omniattach_backends::BackendContext::new(runner.as_ref());
+                    job.check().map_err(|e| {
+                        omniattach_documents::Error::Parse(format!("OCR context: {e}"))
+                    })?;
+                    let mut ctx = omniattach_backends::BackendContext::new(runner.as_ref());
+                    ctx.run_options.cancellation = job.cancellation().clone();
+                    if let Some(remaining) = job.remaining() {
+                        ctx.run_options.timeout = ctx.run_options.timeout.min(remaining);
+                    }
                     let units = omniattach_backends::PdfPageOcr::default()
                         .with_language(language.clone())
                         .with_dpi(dpi)
                         .recognize_page_words(&path, page, &ctx)
                         .map_err(|e| omniattach_documents::Error::Parse(format!("OCR: {e}")))?;
+                    job.check().map_err(|e| {
+                        omniattach_documents::Error::Parse(format!("OCR context: {e}"))
+                    })?;
                     let text = units
                         .iter()
                         .map(|w| w.text.as_str())
@@ -217,7 +221,6 @@ impl Converter for DocumentConverter {
     }
 }
 impl OmniAttachBuilder {
-    /// Registers document routes; XML fails explicitly without a mapping.
     pub fn with_document_defaults(self) -> Result<Self> {
         self.with_document_converter(DocumentConverter::new())
     }
@@ -284,5 +287,20 @@ mod option_tests {
         ] {
             assert!(parse_document_options(&value).is_err());
         }
+    }
+    #[test]
+    fn native_errors_are_not_flattened() {
+        assert!(matches!(
+            document_error(omniattach_documents::Error::LimitExceeded("fixture".into())),
+            Error::Document(omniattach_documents::Error::LimitExceeded(_))
+        ));
+        assert!(matches!(
+            document_error(omniattach_documents::Error::InvalidInput("fixture".into())),
+            Error::Document(omniattach_documents::Error::InvalidInput(_))
+        ));
+        assert!(matches!(
+            document_error(omniattach_documents::Error::Parse("fixture".into())),
+            Error::Document(omniattach_documents::Error::Parse(_))
+        ));
     }
 }
