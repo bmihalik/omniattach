@@ -6,6 +6,8 @@ mod context;
 mod documents_adapter;
 #[cfg(feature = "documents")]
 mod documents_defaults;
+#[cfg(feature = "documents")]
+mod pdf_images_adapter;
 mod engine;
 mod error;
 mod fallback;

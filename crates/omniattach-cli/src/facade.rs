@@ -21,7 +21,8 @@ impl FacadeEngine {
             .map_err(map_error)?;
         #[cfg(feature = "documents")]
         {
-            builder = builder.with_document_defaults().map_err(map_error)?;
+            builder = builder.with_document_defaults().map_err(map_error)?
+                .with_pdf_image_projection().map_err(map_error)?;
         }
         #[allow(unused_mut)]
         let mut legacy_routes = false;
