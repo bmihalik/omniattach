@@ -20,7 +20,7 @@ fn fixture(filter: &str, special: Option<&str>, form: bool, page_count: usize) -
     }
     let image = pdf.add_object(Stream::new(image_dict, jpeg()));
     let target = if form {
-        pdf.add_object(Stream::new(dictionary! {"Type" => "XObject", "Subtype" => "Form", "BBox" => vec![0, 0, 2, 1], "Resources" => dictionary! {"XObject" => dictionary! {"Im" => image}}}, b"/Im Do".to_vec()))
+        pdf.add_object(Stream::new(dictionary! {"Type" => "XObject", "Subtype" => "Form", "BBox" => vec![Object::Integer(0), Object::Integer(0), Object::Integer(2), Object::Integer(1)], "Resources" => dictionary! {"XObject" => dictionary! {"Im" => image}}}, b"/Im Do".to_vec()))
     } else { image };
     let resources = pdf.add_object(dictionary! {"Font" => dictionary! {"F1" => font}, "XObject" => dictionary! {"Target" => target}});
     let show = |s: &str| Operation::new("Tj", vec![Object::string_literal(s)]);
@@ -41,7 +41,7 @@ fn fixture(filter: &str, special: Option<&str>, form: bool, page_count: usize) -
         let page = pdf.add_object(dictionary! {"Type" => "Page", "Parent" => pages, "Contents" => content});
         kids.push(Object::Reference(page));
     }
-    pdf.objects.insert(pages, Object::Dictionary(dictionary! {"Type" => "Pages", "Kids" => kids, "Count" => page_count as i64, "Resources" => resources, "MediaBox" => vec![0, 0, 612, 792]}));
+    pdf.objects.insert(pages, Object::Dictionary(dictionary! {"Type" => "Pages", "Kids" => kids, "Count" => page_count as i64, "Resources" => resources, "MediaBox" => vec![Object::Integer(0), Object::Integer(0), Object::Integer(612), Object::Integer(792)]}));
     let root = pdf.add_object(dictionary! {"Type" => "Catalog", "Pages" => pages});
     pdf.trailer.set("Root", root);
     let mut bytes = Vec::new();
