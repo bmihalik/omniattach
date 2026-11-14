@@ -1,0 +1,46 @@
+name: LFE region proposal baseline
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'scripts/*lfe*'
+      - 'scripts/LFE_REGION_PROPOSALS.md'
+      - '.github/workflows/lfe-equation-regions.yml'
+  pull_request:
+    paths:
+      - 'scripts/*lfe*'
+      - 'scripts/LFE_REGION_PROPOSALS.md'
+      - '.github/workflows/lfe-equation-regions.yml'
+permissions:
+  contents: read
+jobs:
+  proposals:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r scripts/requirements-lfe-equations.txt
+      - run: python -m unittest discover -s scripts -p test_lfe_equation_regions.py -v
+      - run: python scripts/lfe_equation_fixtures.py "$RUNNER_TEMP/regions-corpus"
+      - run: python scripts/validate_lfe_equation_fixtures.py "$RUNNER_TEMP/regions-corpus"
+      - run: python scripts/lfe_equation_regions.py "$RUNNER_TEMP/regions-corpus" "$RUNNER_TEMP/regions-run" --dpi 150 --iou 0.5
+      - name: Check accounting, not detector accuracy
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          r=json.loads((Path(os.environ['RUNNER_TEMP'])/'regions-run/report.json').read_text())
+          assert r['proposals_ground_truth_guided'] is False and r['equation_classifier'] is False
+          assert r['metrics']['total_positive_occurrences']==36
+          assert r['metrics']['reference_failures']==0 and r['metrics']['negative_pages_rendered']==1
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: lfe-region-proposals
+          path: |
+            ${{ runner.temp }}/regions-corpus
+            ${{ runner.temp }}/regions-run
