@@ -38,15 +38,18 @@ def pixel_box(bounds,width,height,dpi):
     if not all(math.isfinite(v) and v>0 for v in [width,height]):
         raise ValueError('invalid page dimensions')
     scale=dpi/72
-    if math.ceil(width*scale)*math.ceil(height*scale)>MAX_PIXELS:
+    raster_width,raster_height=math.ceil(width*scale),math.ceil(height*scale)
+    if raster_width*raster_height>MAX_PIXELS:
         raise ValueError('page exceeds raster pixel budget')
     if len(bounds)!=4 or not all(math.isfinite(v) for v in bounds):
         raise ValueError('invalid crop bounds')
     left,bottom,right,top=bounds
     if not (0<=left<right<=width and 0<=bottom<top<=height):
         raise ValueError('crop outside page or empty; no silent clamping')
-    return [math.floor(left*scale),math.floor((height-top)*scale),
-            math.ceil(right*scale),math.ceil((height-bottom)*scale)]
+    # PDFium maps the page to its ceil-rounded device rectangle.
+    scale_x,scale_y=raster_width/width,raster_height/height
+    return [math.floor(left*scale_x),math.floor((height-top)*scale_y),
+            math.ceil(right*scale_x),math.ceil((height-bottom)*scale_y)]
 
 
 def render_crop(path,occurrence,dpi,destination,expected_pages):
@@ -60,6 +63,8 @@ def render_crop(path,occurrence,dpi,destination,expected_pages):
                 or media[:2]!=[0,0] or crop!=media):
             raise ValueError('control requires zero-origin, unrotated, uncropped, UserUnit=1 pages')
         width,height=media[2:]
+        scale=dpi/72
+        expected_size=(math.ceil(width*scale),math.ceil(height*scale))
         box=pixel_box(occurrence['bbox_pdf'],width,height,dpi)
     with closing(pdfium.PdfDocument(str(path))) as document:
         if len(document)!=count:
@@ -67,10 +72,10 @@ def render_crop(path,occurrence,dpi,destination,expected_pages):
         with closing(document[occurrence['page']-1]) as page:
             if page.get_rotation()!=0 or any(abs(a-b)>.001 for a,b in zip(page.get_bbox(),media)):
                 raise ValueError('renderer/parser geometry disagreement')
-            with closing(page.render(scale=dpi/72)) as bitmap:
+            with closing(page.render(scale=scale)) as bitmap:
                 with bitmap.to_pil() as view, view.convert('RGB') as image:
-                    if image.size!=(math.ceil(width*dpi/72),math.ceil(height*dpi/72)):
-                        raise ValueError('unexpected raster dimensions')
+                    if image.size!=expected_size:
+                        raise ValueError(f'unexpected raster dimensions: actual={image.size}, expected={expected_size}, scale={scale!r}')
                     with image.crop(box) as crop:
                         mask=crop.point(lambda v:255 if v<245 else 0)
                         channels=mask.split()
@@ -80,7 +85,7 @@ def render_crop(path,occurrence,dpi,destination,expected_pages):
                             threshold_ink_bbox=ink_bbox,edge_ink=bool(ink_bbox and
                             (ink_bbox[0]==0 or ink_bbox[1]==0 or ink_bbox[2]==crop.width or ink_bbox[3]==crop.height)))
                         crop.save(destination)
-                        return dict(pixel_box=box,page_size_pdf=[width,height],image_size=list(crop.size),
+                        return dict(pixel_box=box,page_size_pdf=[width,height],page_raster_size=list(image.size),image_size=list(crop.size),
                             pixel_sha256=hashlib.sha256(crop.tobytes()).hexdigest(),**stats)
 
 

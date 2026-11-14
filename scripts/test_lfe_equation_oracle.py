@@ -108,4 +108,25 @@ class OracleTests(unittest.TestCase):
             self.assertEqual(report['comparisons'][0]['exact_agreements'],expected)
             self.assertTrue(all(c['raw_consistent'] for c in report['backends'][0]['per_occurrence_repeat_consistency']))
 
+    def test_letter_page_raster_rounding(self):
+        writer=PdfWriter();writer.append(PdfReader(io.BytesIO(self.pdf.read_bytes())))
+        for page in writer.pages:
+            page.mediabox=RectangleObject([0,0,612,792]);page.cropbox=RectangleObject([0,0,612,792])
+        writer.write(self.pdf);self.manifest['documents'][0]['sha256']=oracle.digest(self.pdf);self.save_manifest()
+        for dpi,size in [(72,[612,792]),(150,[1275,1651]),(300,[2550,3301])]:
+            with self.subTest(dpi=dpi):
+                report=oracle.prepare(self.root,self.root/str(dpi),dpi)
+                self.assertEqual(report['coverage']['statuses'],dict(ready=3,out_of_control_scope=1))
+                for row in report['occurrences'][:3]: self.assertEqual(row['page_raster_size'],size)
+        self.assertEqual(oracle.pixel_box([60,590,552,710],612,792,150),[125,170,1150,422])
+        self.assertEqual(oracle.pixel_box([60,600,540,700],612,792,150),[125,191,1125,401])
+
+    def test_unexpected_raster_size_still_rejected(self):
+        wrong=types.SimpleNamespace(to_pil=lambda:Image.new('RGB',(1,1),'white'),close=lambda:None)
+        with patch.object(oracle.pdfium.PdfPage,'render',return_value=wrong):
+            report=oracle.prepare(self.root,self.out,150)
+        self.assertEqual(report['coverage']['statuses'],dict(crop_failed=3,out_of_control_scope=1))
+        for row in report['occurrences'][:3]:
+            self.assertIn('actual=(1, 1)',row['error']);self.assertIn('expected=(209, 167)',row['error'])
+
 if __name__=='__main__': unittest.main()
