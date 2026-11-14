@@ -4,14 +4,20 @@ on:
   push:
     paths:
       - 'scripts/lfe_equation_eval.py'
+      - 'scripts/lfe_equation_metrics.py'
       - 'scripts/test_lfe_equation_eval.py'
+      - 'scripts/test_lfe_equation_metrics.py'
+      - 'scripts/LFE_EQUATION_EVALUATION.md'
       - 'scripts/lfe_texteller_worker.py'
       - 'tools/lfe-formula-bobine/**'
       - '.github/workflows/lfe-equation-eval.yml'
   pull_request:
     paths:
       - 'scripts/lfe_equation_eval.py'
+      - 'scripts/lfe_equation_metrics.py'
       - 'scripts/test_lfe_equation_eval.py'
+      - 'scripts/test_lfe_equation_metrics.py'
+      - 'scripts/LFE_EQUATION_EVALUATION.md'
       - 'scripts/lfe_texteller_worker.py'
       - 'tools/lfe-formula-bobine/**'
       - '.github/workflows/lfe-equation-eval.yml'
@@ -25,5 +31,5 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: python -m unittest discover -s scripts -p test_lfe_equation_eval.py -v
-      - run: python -m py_compile scripts/lfe_equation_eval.py scripts/lfe_texteller_worker.py
+      - run: python -m unittest discover -s scripts -p 'test_lfe_equation_[em]*.py' -v
+      - run: python -m py_compile scripts/lfe_equation_eval.py scripts/lfe_equation_metrics.py scripts/lfe_texteller_worker.py

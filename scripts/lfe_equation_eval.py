@@ -8,11 +8,13 @@ import math
 import os
 from pathlib import Path
 import platform
+import shutil
 import signal
 import statistics
 import subprocess
 import tempfile
 import time
+from lfe_equation_metrics import POLICY, add_metrics, formatting_equal, strip_outer_math
 
 
 def digest(path):
@@ -100,7 +102,7 @@ def score(response, cases):
         exact=sum(r['exact'] for r in rows), trimmed_exact=sum(r['trimmed_exact'] for r in rows),
         exact_rate=sum(r['exact'] for r in rows)/n,
         median_reported_inference_ms=statistics.median(times) if times else None,
-        rows=rows)
+        formatting_metrics=add_metrics(rows), rows=rows)
 
 
 def evaluate(root, config, repeats=1, timeout=600):
@@ -127,6 +129,8 @@ def evaluate(root, config, repeats=1, timeout=600):
         entry = dict(id=backend['id'], config=backend)
         start = time.perf_counter()
         try:
+            executable = shutil.which(backend['argv'][0])
+            entry['executable_artifact'] = dict(path=str(Path(executable).resolve()), sha256=digest(executable)) if executable else None
             response, wall, diagnostic = invoke(backend['argv'], request, timeout)
             for item in source:
                 if digest(item['image']) != item['sha256']:
@@ -136,19 +140,25 @@ def evaluate(root, config, repeats=1, timeout=600):
                          metadata=response.get('metadata',{}), **result)
         except (OSError, ValueError, KeyError, TypeError, RuntimeError, TimeoutError) as error:
             entry.update(status='failed', error=str(error), batch_wall_ms=(time.perf_counter()-start)*1000,
-                         cases=len(cases), usable=0, exact=0, exact_rate=0, rows=[])
+                         cases=len(cases), usable=0, exact=0, exact_rate=0, rows=[],
+                         formatting_metrics=None)
         reports.append(entry)
     comparisons = []
     for a,b in itertools.combinations(reports,2):
         pairs = list(zip(a['rows'],b['rows']))
+        usable_pairs = [(x['prediction']['latex'],y['prediction']['latex']) for x,y in pairs if x['usable'] and y['usable']]
         comparisons.append(dict(backends=[a['id'],b['id']], total_cases=len(cases),
-            comparable=sum(x['usable'] and y['usable'] for x,y in pairs),
-            exact_agreements=sum(x['usable'] and y['usable'] and x['prediction']['latex']==y['prediction']['latex'] for x,y in pairs)))
-    return dict(schema_version='omniattach/formula-evaluation/0.1',
+            comparable=len(usable_pairs),
+            exact_agreements=sum(x==y for x,y in usable_pairs),
+            outer_math_delimiter_agreements=sum(bool(strip_outer_math(x)) and strip_outer_math(x)==strip_outer_math(y) for x,y in usable_pairs),
+            formatting_normalized_agreements=sum(formatting_equal(x,y) for x,y in usable_pairs)))
+    return dict(schema_version='omniattach/formula-evaluation/0.1', scoring_policy=POLICY,
+        evaluation_code=dict(evaluator_sha256=digest(__file__),
+            metrics_sha256=digest(Path(__file__).with_name('lfe_equation_metrics.py'))),
         corpus_manifest_sha256=digest(Path(root)/'manifest.json'),
         environment=dict(python=platform.python_version(), platform=platform.platform()),
         unique_formulas=len(source), repeats=repeats, backends=reports, comparisons=comparisons,
-        scope='clean image recognition only; string accuracy, not semantic equivalence or PDF detection; completion/truncation and peak memory not measured')
+        scope='clean image recognition only; raw and restricted formatting-normalized string accuracy, not semantic equivalence or PDF detection; completion/truncation and peak memory not measured')
 
 
 if __name__ == '__main__':
