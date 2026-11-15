@@ -19,7 +19,7 @@ impl OmniAttachBuilder {
         )
     }
 }
-struct PdfImageConverter;
+pub(crate) struct PdfImageConverter;
 impl Converter for PdfImageConverter {
     fn convert(
         &self,

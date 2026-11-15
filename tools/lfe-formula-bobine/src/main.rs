@@ -5,11 +5,16 @@ use std::{io::{self, Read}, path::Path, time::Instant};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().collect();
-    if args.len() != 5 {
-        return Err("usage: lfe-formula-bobine ENCODER DECODER TOKENIZER MAX_TOKENS".into());
+    if args.len() != 5 && !(args.len() == 7 && args[5] == "--request-file") {
+        return Err("usage: lfe-formula-bobine ENCODER DECODER TOKENIZER MAX_TOKENS [--request-file PATH]".into());
     }
     let mut input = String::new();
-    io::stdin().read_to_string(&mut input)?;
+    if args.len() == 7 {
+        std::fs::File::open(&args[6])?.take(1_048_577).read_to_string(&mut input)?;
+    } else {
+        io::stdin().take(1_048_577).read_to_string(&mut input)?;
+    }
+    if input.len() > 1_048_576 { return Err("request exceeds 1 MiB".into()); }
     let request: Value = serde_json::from_str(&input)?;
     if request["schema_version"] != "omniattach/formula-worker/0.1" {
         return Err("unsupported worker protocol".into());
