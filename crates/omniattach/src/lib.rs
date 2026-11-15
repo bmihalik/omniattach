@@ -12,6 +12,8 @@ mod fallback;
 mod format;
 #[cfg(feature = "backends")]
 mod layout_adapter;
+#[cfg(feature = "backends")]
+pub mod model_store;
 #[cfg(all(feature = "documents", feature = "backends"))]
 pub mod pdf_equations_adapter;
 #[cfg(feature = "documents")]

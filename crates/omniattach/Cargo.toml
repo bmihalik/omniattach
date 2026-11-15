@@ -27,3 +27,7 @@ omniattach-backends = { path = "../omniattach-backends", version = "0.1.0", opti
 [[example]]
 name = "external"
 required-features = ["backends"]
+
+[[example]]
+name = "provision-equation-model"
+required-features = ["backends"]
