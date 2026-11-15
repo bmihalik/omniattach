@@ -15,6 +15,8 @@ mod package;
 #[cfg(feature = "pdf")]
 mod pdf;
 #[cfg(feature = "pdf")]
+pub mod pdf_equations;
+#[cfg(feature = "pdf")]
 mod pdf_images;
 mod render;
 #[cfg(feature = "office")]
