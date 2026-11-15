@@ -17,10 +17,16 @@ impl FacadeEngine {
     pub fn new(config: &EngineConfig) -> Result<Self> {
         let equation_config = std::env::var_os("OMNIATTACH_PDF_EQUATION_WORKER_CONFIG");
         if equation_config.is_some() && !config.external_backends {
-            return Err(CliError::usage("equation worker registration requires --external-backends"));
+            return Err(CliError::usage(
+                "equation worker registration requires --external-backends",
+            ));
         }
         #[cfg(not(feature = "documents"))]
-        if equation_config.is_some() { return Err(CliError::unsupported("equation worker requires documents and backends features")); }
+        if equation_config.is_some() {
+            return Err(CliError::unsupported(
+                "equation worker requires documents and backends features",
+            ));
+        }
         #[allow(unused_mut)]
         let mut builder = OmniAttach::builder()
             .with_portable_defaults()
@@ -44,8 +50,14 @@ impl FacadeEngine {
                     builder = builder.with_legacy_office_pipelines().map_err(map_error)?;
                     legacy_routes = true;
                     if let Some(path) = &equation_config {
-                        let worker = omniattach::pdf_equations_adapter::EquationWorkerConfig::from_file(std::path::PathBuf::from(path)).map_err(map_error)?;
-                        builder = builder.with_pdf_equation_worker(worker).map_err(map_error)?;
+                        let worker =
+                            omniattach::pdf_equations_adapter::EquationWorkerConfig::from_file(
+                                std::path::PathBuf::from(path),
+                            )
+                            .map_err(map_error)?;
+                        builder = builder
+                            .with_pdf_equation_worker(worker)
+                            .map_err(map_error)?;
                     }
                 }
                 if let Some(model) = &config.whisper_model {

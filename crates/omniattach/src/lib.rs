@@ -12,10 +12,10 @@ mod fallback;
 mod format;
 #[cfg(feature = "backends")]
 mod layout_adapter;
-#[cfg(feature = "documents")]
-mod pdf_images_adapter;
 #[cfg(all(feature = "documents", feature = "backends"))]
 pub mod pdf_equations_adapter;
+#[cfg(feature = "documents")]
+mod pdf_images_adapter;
 mod pipeline;
 mod portable;
 mod request;
