@@ -1,24 +1,18 @@
 {
-  "id": "texteller3-onnx",
+  "repo_id": "opticsWolf/texteller3-onnx",
   "revision": "5f817336d600ae880205362e16092994aecd01e1",
   "files": [
     {
-      "name": "encoder_model.onnx",
-      "url": "https://huggingface.co/opticsWolf/texteller3-onnx/resolve/5f817336d600ae880205362e16092994aecd01e1/encoder_model.onnx",
-      "sha256": "9ba777dca7dddcc0bc6bdaa69591cf67482f6cdfd393b0dd0da354e1ecd629ef",
-      "max_bytes": 1073741824
+      "path": "encoder_model.onnx",
+      "sha256": "9ba777dca7dddcc0bc6bdaa69591cf67482f6cdfd393b0dd0da354e1ecd629ef"
     },
     {
-      "name": "decoder_model_merged.onnx",
-      "url": "https://huggingface.co/opticsWolf/texteller3-onnx/resolve/5f817336d600ae880205362e16092994aecd01e1/decoder_model_merged.onnx",
-      "sha256": "8b78f10f67da98528fb507977f6d041fe0a8fb486a56b2132156f93b2d5de575",
-      "max_bytes": 1073741824
+      "path": "decoder_model_merged.onnx",
+      "sha256": "8b78f10f67da98528fb507977f6d041fe0a8fb486a56b2132156f93b2d5de575"
     },
     {
-      "name": "tokenizer.json",
-      "url": "https://huggingface.co/opticsWolf/texteller3-onnx/resolve/5f817336d600ae880205362e16092994aecd01e1/tokenizer.json",
-      "sha256": "ec4ca954798a092faf6fefcfa47fb5f85d76cdf6ab170b624ae1a683d53dae14",
-      "max_bytes": 16777216
+      "path": "tokenizer.json",
+      "sha256": "ec4ca954798a092faf6fefcfa47fb5f85d76cdf6ab170b624ae1a683d53dae14"
     }
   ]
 }

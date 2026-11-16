@@ -11,7 +11,7 @@ repository = "https://github.com/bmihalik/omniattach"
 default = []
 core = ["dep:omniattach-core"]
 documents = ["dep:omniattach-documents", "omniattach-documents/office", "omniattach-documents/pdf", "omniattach-documents/mobi", "omniattach-documents/azw3"]
-backends = ["dep:omniattach-backends"]
+backends = ["dep:omniattach-backends", "dep:hf-hub", "dep:tokio"]
 workspace = ["core", "documents", "backends"]
 
 [dependencies]
@@ -20,6 +20,8 @@ serde_json = "1"
 thiserror = "2"
 tempfile = "3"
 sha2 = "0.10"
+hf-hub = { version = "=0.4.3", optional = true, default-features = false, features = ["tokio", "rustls-tls"] }
+tokio = { version = "1", optional = true, features = ["rt", "time", "macros"] }
 omniattach-core = { path = "../omniattach-core", version = "0.1.0", optional = true }
 omniattach-documents = { path = "../omniattach-documents", version = "0.3.0", optional = true }
 omniattach-backends = { path = "../omniattach-backends", version = "0.1.0", optional = true }
