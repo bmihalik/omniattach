@@ -1,137 +1,16 @@
-#![cfg(feature = "backends")]
-use hf_hub::{Cache, Repo, RepoType};
-use omniattach::{Error, model_store::*};
-use sha2::{Digest, Sha256};
+#![cfg(feature="backends")]
+use omniattach::{model_store::*,Error};
+use hf_hub::{Repo,RepoType,Cache};
+use sha2::{Digest,Sha256};
 use std::fs;
-fn spec() -> HubModelSpec {
-    HubModelSpec {
-        repo_id: "test/model".into(),
-        revision: "main".into(),
-        files: vec![HubFile {
-            path: "nested/model.bin".into(),
-            sha256: Some(format!("{:x}", Sha256::digest(b"model"))),
-        }],
-    }
-}
-fn cached(root: &std::path::Path, s: &HubModelSpec) {
-    let repo = Repo::with_revision(s.repo_id.clone(), RepoType::Model, s.revision.clone());
-    let snapshot = root
-        .join(repo.folder_name())
-        .join("snapshots")
-        .join("a".repeat(40));
-    fs::create_dir_all(snapshot.join("nested")).unwrap();
-    fs::write(snapshot.join("nested/model.bin"), b"model").unwrap();
-    Cache::new(root.into())
-        .repo(repo)
-        .create_ref(&"a".repeat(40))
-        .unwrap();
-}
-#[test]
-fn offline_missing_has_no_storage_side_effects() {
-    let tmp = tempfile::tempdir().unwrap();
-    let root = tmp.path().join("hub");
-    let store = ModelStore::new(&root).unwrap();
-    assert!(matches!(
-        store
-            .inspect(&spec(), &ProvisionOptions::default())
-            .unwrap(),
-        ModelStatus::Missing
-    ));
-    assert!(
-        store
-            .provision(&spec(), &ProvisionOptions::default())
-            .is_err()
-    );
-    assert!(!root.exists());
-}
-#[test]
-fn standard_hub_cache_is_reused_offline() {
-    let tmp = tempfile::tempdir().unwrap();
-    let s = spec();
-    cached(tmp.path(), &s);
-    let store = ModelStore::new(tmp.path()).unwrap();
-    let model = store.provision(&s, &ProvisionOptions::default()).unwrap();
-    assert_eq!(model.revision(), "a".repeat(40));
-    assert_eq!(
-        fs::read(model.file("nested/model.bin").unwrap()).unwrap(),
-        b"model"
-    );
-}
-#[test]
-fn direct_commit_cache_needs_no_commit_named_ref() {
-    let tmp = tempfile::tempdir().unwrap();
-    let mut s = spec();
-    cached(tmp.path(), &s);
-    s.revision = "a".repeat(40);
-    assert!(
-        ModelStore::new(tmp.path())
-            .unwrap()
-            .verify(&s, &ProvisionOptions::default())
-            .is_ok()
-    );
-}
-#[test]
-fn urls_and_traversal_are_rejected() {
-    let tmp = tempfile::tempdir().unwrap();
-    for mode in 0..3 {
-        let mut s = spec();
-        match mode {
-            0 => s.repo_id = "https://other.example/model".into(),
-            1 => s.files[0].path = "../outside".into(),
-            _ => s.revision = "../outside".into(),
-        };
-        assert!(
-            ModelStore::new(tmp.path())
-                .unwrap()
-                .provision(&s, &ProvisionOptions::default())
-                .is_err()
-        );
-    }
-}
-#[test]
-fn old_url_manifest_is_not_supported() {
-    let raw = r#"{"id":"old","revision":"main","files":[{"name":"weights","url":"https://example.invalid/file","sha256":"x","max_bytes":1}]}"#;
-    assert!(serde_json::from_str::<HubModelSpec>(raw).is_err());
-}
-#[test]
-fn corrupt_cache_is_not_accepted() {
-    let tmp = tempfile::tempdir().unwrap();
-    let s = spec();
-    cached(tmp.path(), &s);
-    let store = ModelStore::new(tmp.path()).unwrap();
-    let model = store.verify(&s, &ProvisionOptions::default()).unwrap();
-    fs::write(model.file("nested/model.bin").unwrap(), b"wrong").unwrap();
-    assert!(matches!(
-        store.inspect(&s, &ProvisionOptions::default()).unwrap(),
-        ModelStatus::Invalid { .. }
-    ));
-}
-#[test]
-fn token_debug_is_redacted() {
-    let mut options = ProvisionOptions::default();
-    options.token = Some("SUPER_SECRET".into());
-    assert!(!format!("{options:?}").contains("SUPER_SECRET"));
-}
-#[test]
-fn cancellation_and_byte_limits_apply_to_cached_data() {
-    let tmp = tempfile::tempdir().unwrap();
-    let s = spec();
-    cached(tmp.path(), &s);
-    let store = ModelStore::new(tmp.path()).unwrap();
-    let mut options = ProvisionOptions::default();
-    options.max_file_bytes = 1;
-    assert!(matches!(store.verify(&s, &options), Err(Error::Limit(_))));
-    let options = ProvisionOptions::default();
-    options.cancellation.cancel();
-    assert!(matches!(
-        store.provision(&s, &options),
-        Err(Error::Cancelled)
-    ));
-}
-#[test]
-fn preset_is_a_hub_request_not_a_url_source() {
-    let s = texteller3_onnx_spec().unwrap();
-    assert_eq!(s.repo_id, "opticsWolf/texteller3-onnx");
-    assert_eq!(s.revision.len(), 40);
-    assert_eq!(s.files.len(), 3);
-}
+fn spec()->HubModelSpec{HubModelSpec{repo_id:"test/model".into(),revision:"main".into(),files:vec![HubFile{path:"nested/model.bin".into(),sha256:Some(format!("{:x}",Sha256::digest(b"model")))}]}}
+fn cached(root:&std::path::Path,s:&HubModelSpec){let repo=Repo::with_revision(s.repo_id.clone(),RepoType::Model,s.revision.clone());let snapshot=root.join(repo.folder_name()).join("snapshots").join("a".repeat(40));fs::create_dir_all(snapshot.join("nested")).unwrap();fs::write(snapshot.join("nested/model.bin"),b"model").unwrap();Cache::new(root.into()).repo(repo).create_ref(&"a".repeat(40)).unwrap();}
+#[test]fn offline_missing_has_no_storage_side_effects(){let tmp=tempfile::tempdir().unwrap();let root=tmp.path().join("hub");let store=ModelStore::new(&root).unwrap();assert!(matches!(store.inspect(&spec(),&ProvisionOptions::default()).unwrap(),ModelStatus::Missing));assert!(store.provision(&spec(),&ProvisionOptions::default()).is_err());assert!(!root.exists());}
+#[test]fn standard_hub_cache_is_reused_offline(){let tmp=tempfile::tempdir().unwrap();let s=spec();cached(tmp.path(),&s);let store=ModelStore::new(tmp.path()).unwrap();let model=store.provision(&s,&ProvisionOptions::default()).unwrap();assert_eq!(model.revision(),"a".repeat(40));assert_eq!(fs::read(model.file("nested/model.bin").unwrap()).unwrap(),b"model");}
+#[test]fn direct_commit_cache_needs_no_commit_named_ref(){let tmp=tempfile::tempdir().unwrap();let mut s=spec();cached(tmp.path(),&s);s.revision="a".repeat(40);assert!(ModelStore::new(tmp.path()).unwrap().verify(&s,&ProvisionOptions::default()).is_ok());}
+#[test]fn urls_and_traversal_are_rejected(){let tmp=tempfile::tempdir().unwrap();for mode in 0..3{let mut s=spec();match mode{0=>s.repo_id="https://other.example/model".into(),1=>s.files[0].path="../outside".into(),_=>s.revision="../outside".into()};assert!(ModelStore::new(tmp.path()).unwrap().provision(&s,&ProvisionOptions::default()).is_err());}}
+#[test]fn old_url_manifest_is_not_supported(){let raw=r#"{"id":"old","revision":"main","files":[{"name":"weights","url":"https://example.invalid/file","sha256":"x","max_bytes":1}]}"#;assert!(serde_json::from_str::<HubModelSpec>(raw).is_err());}
+#[test]fn corrupt_cache_is_not_accepted(){let tmp=tempfile::tempdir().unwrap();let s=spec();cached(tmp.path(),&s);let store=ModelStore::new(tmp.path()).unwrap();let model=store.verify(&s,&ProvisionOptions::default()).unwrap();fs::write(model.file("nested/model.bin").unwrap(),b"wrong").unwrap();assert!(matches!(store.inspect(&s,&ProvisionOptions::default()).unwrap(),ModelStatus::Invalid{..}));}
+#[test]fn token_debug_is_redacted(){let mut options=ProvisionOptions::default();options.token=Some("SUPER_SECRET".into());assert!(!format!("{options:?}").contains("SUPER_SECRET"));}
+#[test]fn cancellation_and_byte_limits_apply_to_cached_data(){let tmp=tempfile::tempdir().unwrap();let s=spec();cached(tmp.path(),&s);let store=ModelStore::new(tmp.path()).unwrap();let mut options=ProvisionOptions::default();options.max_file_bytes=1;assert!(matches!(store.verify(&s,&options),Err(Error::Limit(_))));let options=ProvisionOptions::default();options.cancellation.cancel();assert!(matches!(store.provision(&s,&options),Err(Error::Cancelled)));}
+#[test]fn preset_is_a_hub_request_not_a_url_source(){let s=texteller3_onnx_spec().unwrap();assert_eq!(s.repo_id,"opticsWolf/texteller3-onnx");assert_eq!(s.revision.len(),40);assert_eq!(s.files.len(),3);}

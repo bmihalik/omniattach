@@ -68,12 +68,12 @@ cargo test --locked -p omniattach --features workspace --test model_store --test
 cargo test --locked -p omniattach --features workspace --lib model_progress
 cargo check --locked --workspace --all-features --all-targets
 cargo run -p omniattach --features backends --example provision-equation-model -- \
-  /srv/huggingface/hub --inspect
+  /srv/omniattach/hub --inspect
 cargo run -p omniattach --features backends --example provision-equation-model -- \
-  /srv/huggingface/hub --download --allow-network --progress text
+  /srv/omniattach/hub --download --allow-network --progress text
 # Generic Hub file selection; replace the identity/path with a real selection:
 cargo run -p omniattach --features backends --example provision-equation-model -- \
-  /srv/huggingface/hub --download --allow-network --repo owner/model \
+  /srv/omniattach/hub --download --allow-network --repo owner/model \
   --revision main --file nested/model.safetensors --progress ndjson
 ```
 
