@@ -18,6 +18,8 @@ mod pdf;
 pub mod pdf_equations;
 #[cfg(feature = "pdf")]
 mod pdf_images;
+#[cfg(feature = "pdf")]
+pub mod pdf_tables;
 mod render;
 #[cfg(feature = "office")]
 mod spreadsheet;
