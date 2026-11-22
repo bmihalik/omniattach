@@ -29,11 +29,37 @@ pub enum Command {
     Probe(ProbeArgs),
     /// Inspect XML structure without text or attribute values.
     XmlProbe(XmlArgs),
+    /// List conservative ruled-table candidates on one PDF page (documents feature).
+    PdfTables(PdfTablesArgs),
+    /// Convert one selected ruled-table candidate; does not export a directory.
+    PdfTable(PdfTableArgs),
     /// Resolve an advisory conversion route.
     Plan(PlanArgs),
     /// Convert and export a new durable directory.
     Convert(ConvertArgs),
 }
+#[derive(Debug, Args)]
+pub struct PdfTablesArgs {
+    pub input: PathBuf,
+    #[arg(long, value_parser = clap::value_parser!(u32).range(1..))]
+    pub page: u32,
+    #[arg(long, default_value_t = 536870912)]
+    pub max_input_bytes: u64,
+    #[arg(long, default_value_t = 16777216)]
+    pub max_output_bytes: u64,
+}
+#[derive(Debug, Args)]
+pub struct PdfTableArgs {
+    #[command(flatten)]
+    pub selection: PdfTablesArgs,
+    /// One-based candidate number local to the selected page, not an inspection ID.
+    #[arg(long)]
+    pub candidate: usize,
+    #[arg(long, value_enum, default_value = "json")]
+    pub output_format: TableOutputFormat,
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum TableOutputFormat { Json, Markdown }
 #[derive(Debug, Args)]
 pub struct ProbeArgs {
     pub input: PathBuf,

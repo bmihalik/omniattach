@@ -4,6 +4,8 @@ use std::{
     io::{Read, Write},
     path::{Path, PathBuf},
 };
+#[path = "tables.rs"]
+mod tables;
 /// Transport boundary; the production engine delegates to the facade.
 pub trait Engine {
     fn capabilities(&self) -> Result<Value>;
@@ -225,9 +227,11 @@ pub fn dispatch(
     match &cli.command {
         Command::Capabilities => write_json(
             stdout,
-            &json!({"schema":"omniattach-cli/capabilities/0.1","build":crate::error::BuildSupport::default(),"commands":["capabilities","probe","xml-probe","plan","convert"],"registered":engine.capabilities()?,"health_checked":false}),
+            &json!({"schema":"omniattach-cli/capabilities/0.1","build":crate::error::BuildSupport::default(),"commands":["capabilities","probe","xml-probe","pdf-tables","pdf-table","plan","convert"],"registered":engine.capabilities()?,"health_checked":false,"pdf_tables_enabled":cfg!(feature="documents")}),
             cli.pretty,
         ),
+        Command::PdfTables(args) => tables::list(args, cli.pretty, runtime, stdout),
+        Command::PdfTable(args) => tables::convert(args, cli.pretty, runtime, stdout),
         Command::Probe(args) => write_json(
             stdout,
             &crate::probe::probe(&args.input, args.max_input_bytes, runtime)?,
