@@ -2,6 +2,8 @@
 //! Grid coordinates use the inspection's unnormalized PDF user space. No model runs.
 use crate::{Error, PdfElementKind, PdfInspection, Result};
 use serde::{Deserialize, Serialize};
+#[path = "pdf_tables/discovery.rs"]
+pub mod discovery;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct PdfTableGrid {
