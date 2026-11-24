@@ -4,6 +4,7 @@ import argparse
 import csv
 import difflib
 import hashlib
+from html import unescape
 from html.parser import HTMLParser
 import json
 from pathlib import Path
@@ -30,7 +31,7 @@ def markdown_rows(text):
         cells = re.split(r"(?<!\\)\|", line[1:-1])
         if all(re.fullmatch(r"\s*:?-{3,}:?\s*", c) for c in cells):
             continue
-        rows.append([normalize(c.replace(r"\|", "|").replace("<br />", " ").replace("<br/>", " ").replace("<br>", " ")) for c in cells])
+        rows.append([normalize(unescape(c.replace(r"\|", "|").replace("<br />", " ").replace("<br/>", " ").replace("<br>", " "))) for c in cells])
     if not rows or not rows[0] or any(len(r) != len(rows[0]) for r in rows):
         raise ValueError("empty or nonrectangular Markdown table")
     return rows
@@ -137,7 +138,10 @@ def run(command, prefix, timeout, env=None):
     prefix.with_suffix(".stderr.txt").write_text(stderr, encoding="utf-8")
     prefix.with_suffix(".command.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
     if meta.get("returncode") != 0:
-        raise ValueError(f"command failed; see {prefix}.command.json")
+        detail = " ".join((stderr.strip() or meta.get("error", "no stderr")).split())
+        if len(detail) > 2000:
+            detail = detail[:2000] + " [truncated; see logs]"
+        raise ValueError(f"command failed (exit={meta.get('returncode', 'not available')}): {detail}; see {prefix}.command.json")
     return stdout
 
 

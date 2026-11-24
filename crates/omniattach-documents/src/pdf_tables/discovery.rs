@@ -1,10 +1,11 @@
-//! Conservative single-path grid discovery. Candidate numbers are page-local.
+//! Page-local stroked grids and bounded filled-border band discovery.
 use super::{PdfTableGrid,PdfTableConversion,convert_inspection};
 use crate::{Error,Options,Result};
 use lopdf::{Object,content::Content};
 use serde::{Serialize,Deserialize};
 use sha2::{Digest,Sha256};
 use std::{io::Read,path::Path};
+#[path="filled.rs"] mod filled;
 type Point=[f64;2];
 type Matrix=[f64;6];
 const ID: Matrix=[1.,0.,0.,1.,0.,0.];
@@ -53,7 +54,11 @@ fn grid(segments:&[(Point,Point)])->Option<(Vec<f64>,Vec<f64>)> {
     if (xs[0]-left).abs()>0.01 || (xs[xs.len()-1]-right).abs()>0.01 || (ys[0]-bottom).abs()>0.01 || (ys[ys.len()-1]-top).abs()>0.01 { return None; }
     Some((xs,ys))
 }
+fn filled_content(content:&Content)->bool {
+    content.operations.iter().any(|o|o.operator=="re") && content.operations.iter().any(|o|matches!(o.operator.as_str(),"f"|"F"|"f*"))
+}
 fn discover(content:Content,page:u32,options:&Options)->Result<Vec<PdfTableCandidate>> {
+    if filled_content(&content) { return filled::discover(content,page,options); }
     if content.operations.len()>options.limits.xml_nodes as usize { return Err(Error::LimitExceeded("content operations".into())); }
     let mut m=ID; let mut stack=Vec::new(); let mut segments=Vec::new();
     let mut current=None; let mut start=None; let mut bad=false; let mut candidates=Vec::new();
@@ -114,8 +119,10 @@ pub fn discover_pdf_tables_bytes(name:&str,bytes:&[u8],page:u32,options:&Options
     }
     let data=pdf.get_page_content_with_limit(id,options.limits.archive_bytes.min(usize::MAX as u64) as usize).map_err(|e|Error::Parse(e.to_string()))?;
     let content=Content::decode(&data).map_err(|e|Error::Parse(e.to_string()))?;
+    let is_filled=filled_content(&content);
     let candidates=discover(content,page,options)?;
-    Ok(PdfTableDiscovery { schema_version:"omniattach/pdf-table-discovery/0.1".into(),source:name.into(),source_sha256:format!("{:x}",Sha256::digest(bytes)),page,candidates,warnings:vec!["Page-content S/s grids only; no XObjects, clipping, continuation or normalized page geometry".into()] })
+    let warning=if is_filled { "Thin filled rectangles only (<=2 units), 0.8-unit join tolerance; rectangular clips must contain every band; section spans split into separate rectangular candidates; first row is formatting, not a semantic header; paint visibility not verified; no mixed strokes, XObjects or continuation" } else { "Page-content S/s grids only; no XObjects, clipping, continuation or normalized page geometry" };
+    Ok(PdfTableDiscovery { schema_version:"omniattach/pdf-table-discovery/0.1".into(),source:name.into(),source_sha256:format!("{:x}",Sha256::digest(bytes)),page,candidates,warnings:vec![warning.into()] })
 }
 /// Path variant; reads input once with the configured size limit.
 pub fn discover_pdf_tables(path:impl AsRef<Path>,page:u32,options:&Options)->Result<PdfTableDiscovery> {
@@ -128,7 +135,9 @@ pub fn convert_pdf_table_bytes(name:&str,bytes:&[u8],page:u32,candidate:usize,op
     let discovery=discover_pdf_tables_bytes(name,bytes,page,options)?;
     let selected=discovery.candidates.get(index).ok_or_else(||invalid("candidate not found"))?;
     let report=crate::inspect_pdf_bytes(name,bytes,options)?;
-    convert_inspection(&report,&PdfTableGrid { page,x_boundaries:selected.x_boundaries.clone(),y_boundaries:selected.y_boundaries.clone() },options)
+    let mut result=convert_inspection(&report,&PdfTableGrid { page,x_boundaries:selected.x_boundaries.clone(),y_boundaries:selected.y_boundaries.clone() },options)?;
+    result.warnings.extend(discovery.warnings);
+    Ok(result)
 }
 /// Path variant of selected-candidate conversion, without writing any files.
 pub fn convert_pdf_table(path:impl AsRef<Path>,page:u32,candidate:usize,options:&Options)->Result<PdfTableConversion> {
