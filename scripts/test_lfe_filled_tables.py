@@ -14,6 +14,25 @@ import test_table_corpus as corpus
 BINARY = None
 SAMPLE = None
 
+EXPECTED_CODES = "96150 96151 96152 96153 96154 96155 90901 90911 90875 90876 94010 94400 96002 95957 90806".split()
+EXPECTED_DESCRIPTIONS = {
+    "96150": "Health & behavior assessment (e.g., health- focused clinical interview, behavioral observations, psychophysiological monitoring, health-oriented questionnaires), each 15 minutes face-to-face with the patient; initial assessment",
+    "96151": "Re-assessment",
+    "96152": "Health & behavioral intervention, each 15 minutes, face-to- face; individual",
+    "96153": "Health & behavioral intervention, each 15 minutes, face-to- face; group (2 or more patients)",
+    "96154": "Health & behavioral intervention, each 15 minutes, face-to- face; family (with the patient present)",
+    "96155": "Health & behavioral intervention, each 15 minutes, face-to- face; family (without the patient present)",
+    "90901": "Biofeedback training by any modality",
+    "90911": "Biofeedback training, perineal muscles, anorectal or urethral sphincter, including EMG &/or manometry",
+    "90875": "Individual psychophysiology therapy incorporating biofeedback training by any modality (face-to- face with the patient), with psychotherapy (e.g., insight oriented, behavior modifying or supportive psychotherapy); approximately 20-30 minutes",
+    "90876": "Individual psychophysiology therapy incorporating biofeedback training by any modality (face-to- face with the patient), with psychotherapy (e.g., insight oriented, behavior modifying or supportive psychotherapy); approximately 40-45 minutes",
+    "94010": "Spirometry, including graphic record, total & timed vital capacity, expiratory flow rate measurement(s), with or without maximal voluntary ventilation",
+    "94400": "Breathing response to CO2 (CO2 response curve)",
+    "96002": "Dynamic surface electromyography, during walking or other functional activities, 1- 12 muscles",
+    "95957": "Digital analysis of electroencephalogram (EEG) (e.g., for epileptic spike analysis)",
+    "90806": "Individual psychotherapy. Insight oriented, behavior modifying &/or supportive, in an office or outpatient facility, approximately 45-50 minutes, face-to- face with the patients"
+}
+
 
 def content():
     geometry = "0 0 600 600 re W n\n"
@@ -46,6 +65,21 @@ class Reporting(unittest.TestCase):
 
     def test_numeric_entities_match_html(self):
         self.assertEqual(corpus.markdown_rows("| A&#124;B &amp; C |\n| --- |\n"), [["A|B & C"]])
+
+    def test_extraction_and_comparison_statuses_are_independent(self):
+        cases = [
+            (False, {}, ("success", "not_requested")),
+            (True, {"comparison": {"status": "agree"}}, ("success", "agree")),
+            (True, {"comparison": {"status": "different"}}, ("success", "different")),
+            (True, {"extraction_errors": ["bad"], "errors": ["bad"]}, ("error", "blocked")),
+            (True, {"reference_errors": ["bad"], "errors": ["bad"]}, ("success", "error")),
+            (True, {"unsupported_reference": [{}]}, ("success", "inconclusive")),
+        ]
+        for requested, extra, expected in cases:
+            with self.subTest(expected=expected):
+                page = {"extraction_errors": [], "reference_errors": [], "errors": [], "unsupported_reference": [], **extra}
+                corpus.page_statuses(page, requested)
+                self.assertEqual((page["extraction_status"], page["comparison_status"]), expected)
 
 
 class FilledCLI(unittest.TestCase):
@@ -80,13 +114,22 @@ class FilledCLI(unittest.TestCase):
         self.assertEqual(listing.returncode, 0, listing.stderr)
         candidates = json.loads(listing.stdout)["candidates"]
         self.assertEqual(len(candidates), 8)
-        codes = set()
+        codes, sequences, descriptions = [], [], {}
         for candidate in candidates:
             result = self.invoke("pdf-table", "--candidate", str(candidate["candidate"]))
             self.assertEqual(result.returncode, 0, result.stderr)
-            rows = corpus.markdown_rows(json.loads(result.stdout)["markdown"])
-            codes.update(row[0] for row in rows if row[0].isdigit())
-        self.assertEqual(codes, set("96150 96151 96152 96153 96154 96155 90901 90911 90875 90876 94010 94400 96002 95957 90806".split()))
+            value = json.loads(result.stdout)
+            sequences.extend(value["source_sequences"])
+            rows = corpus.markdown_rows(value["markdown"])
+            for row in rows:
+                if len(row) == 2 and row[0].isdigit():
+                    codes.append(row[0])
+                    descriptions[row[0]] = row[1]
+        self.assertEqual(codes, EXPECTED_CODES, "missing, duplicate, or reordered code rows")
+        self.assertEqual(len(sequences), len(set(sequences)), "source text reused across bands")
+        for code in EXPECTED_CODES:
+            with self.subTest(code=code):
+                self.assertEqual(descriptions[code], EXPECTED_DESCRIPTIONS[code])
 
     def test_cutting_clip_fails_without_partial_output(self):
         self.path.write_bytes(pdf_bytes(content().replace("0 0 600 600", "100 0 500 600")))

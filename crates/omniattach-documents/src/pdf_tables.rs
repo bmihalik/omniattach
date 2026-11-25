@@ -4,6 +4,8 @@ use crate::{Error, PdfElementKind, PdfInspection, Result};
 use serde::{Deserialize, Serialize};
 #[path = "pdf_tables/discovery.rs"]
 pub mod discovery;
+#[path = "pdf_tables/cell_lines.rs"]
+mod cell_lines;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct PdfTableGrid {
@@ -82,23 +84,25 @@ pub fn convert(xs: &[f64], ys: &[f64], runs: &[Run]) -> std::result::Result<Stri
     for row in 0..rows {
         output.push('|');
         for column in 0..columns {
-            let cell=&mut cells[row*columns+column];
-            cell.sort_by(|a,b| b.bounds[3].total_cmp(&a.bounds[3]).then(a.bounds[0].total_cmp(&b.bounds[0])).then(a.sequence.cmp(&b.sequence)));
-            let mut text=String::new(); let mut previous: Option<&Run>=None;
-            for run in cell.iter().copied() {
-                if let Some(last)=previous {
-                    if (last.bounds[3]-run.bounds[3]).abs()>1.0 { text.push_str("<br>"); }
-                    else if run.gap || run.bounds[0]-last.bounds[2]>1.0 { text.push(' '); }
-                }
-                for c in run.text.chars() {
-                    match c {
-                        '&'=>text.push_str("&amp;"), '<'=>text.push_str("&lt;"), '>'=>text.push_str("&gt;"),
-                        '|'=>text.push_str("&#124;"), '\\'=>text.push_str("&#92;"), '*'=>text.push_str("&#42;"),
-                        '_'=>text.push_str("&#95;"), '`'=>text.push_str("&#96;"), '['=>text.push_str("&#91;"),
-                        ']'=>text.push_str("&#93;"), '\n'=>text.push_str("<br>"), '\r'=>{}, c=>text.push(c),
+            let cell=&cells[row*columns+column];
+            let mut text=String::new();
+            for (line_index,line) in cell_lines::ordered(cell)?.iter().enumerate() {
+                if line_index>0 { text.push_str("<br>"); }
+                let mut previous:Option<&Run>=None;
+                for run in line.iter().copied() {
+                    if let Some(last)=previous {
+                        if run.gap || run.bounds[0]-last.bounds[2]>1.0 { text.push(' '); }
                     }
+                    for c in run.text.chars() {
+                        match c {
+                            '&'=>text.push_str("&amp;"), '<'=>text.push_str("&lt;"), '>'=>text.push_str("&gt;"),
+                            '|'=>text.push_str("&#124;"), '\\'=>text.push_str("&#92;"), '*'=>text.push_str("&#42;"),
+                            '_'=>text.push_str("&#95;"), '`'=>text.push_str("&#96;"), '['=>text.push_str("&#91;"),
+                            ']'=>text.push_str("&#93;"), '\n'=>text.push_str("<br>"), '\r'=>{}, c=>text.push(c),
+                        }
+                    }
+                    previous=Some(run);
                 }
-                previous=Some(run);
             }
             output.push(' '); output.push_str(&text); output.push_str(" |");
         }
@@ -141,7 +145,7 @@ pub fn convert_inspection(report: &PdfInspection, grid: &PdfTableGrid, options: 
     if runs.is_empty() { return Err(Error::InvalidInput("selected grid has no decoded text".into())); }
     let markdown=convert(xs,ys,&runs).map_err(Error::InvalidInput)?;
     if markdown.len() as u64>options.limits.archive_bytes { return Err(Error::LimitExceeded("table Markdown bytes".into())); }
-    let mut warnings=vec!["Estimated text bounds; unnormalized PDF user space; fixed 1-unit line tolerance; first row treated as header".into()];
+    let mut warnings=vec!["Estimated text bounds; unnormalized PDF user space; cell-local line grouping; smaller vertically offset fragments emitted inline as plain text; first row treated as header".into()];
     if adjusted>0 || excluded>0 {
         warnings.push(format!("Estimated vertical row assignment: adjusted {adjusted} text runs and excluded {excluded} small adjacent-band incursions; allowance min(1.5 PDF units, 15% of height); horizontal containment remains strict; original inspection bounds unchanged"));
     }

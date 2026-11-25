@@ -118,6 +118,23 @@ def compare(actual, reference):
     return {"status": status, "matches": matches, "unmatched_actual": extra, "unmatched_reference": missing}
 
 
+def page_statuses(record, reference_requested):
+    record["extraction_status"] = "error" if record["extraction_errors"] else "success"
+    if not reference_requested:
+        comparison = "not_requested"
+    elif record["extraction_errors"]:
+        comparison = "blocked"
+    elif record["reference_errors"]:
+        comparison = "error"
+    elif record["unsupported_reference"]:
+        comparison = "inconclusive"
+    else:
+        comparison = record["comparison"]["status"]
+    record["comparison_status"] = comparison
+    legacy = record.get("comparison", {}).get("status", "not_requested")
+    record["status"] = "error" if record["errors"] else "inconclusive" if record["unsupported_reference"] else legacy
+
+
 def run(command, prefix, timeout, env=None):
     started = time.monotonic()
     meta = {"argv": command}
@@ -221,7 +238,7 @@ def main(argv=None):
             for page in range(1, len(reader.pages) + 1):
                 work = directory / f"page-{page:04d}"
                 work.mkdir()
-                record = {"page": page, "actual": [], "reference": [], "unsupported_reference": [], "errors": []}
+                record = {"page": page, "actual": [], "reference": [], "unsupported_reference": [], "errors": [], "extraction_errors": [], "reference_errors": []}
                 doc["pages"].append(record)
                 base = [args.binary, "pdf-tables", str(path), "--page", str(page)]
                 try:
@@ -238,9 +255,13 @@ def main(argv=None):
                             value = json.loads(run([args.binary, "pdf-table", str(path), "--page", str(page), "--candidate", str(number)], work / f"candidate-{number}", args.timeout))
                             record["actual"].append({"candidate": number, "rows": markdown_rows(value["markdown"]), "conversion": value})
                         except (ValueError, KeyError, TypeError) as error:
-                            record["errors"].append(f"candidate {number}: {error}")
+                            message = f"candidate {number}: {error}"
+                            record["errors"].append(message)
+                            record["extraction_errors"].append(message)
                 except (ValueError, KeyError, TypeError) as error:
-                    record["errors"].append(f"discovery: {error}")
+                    message = f"discovery: {error}"
+                    record["errors"].append(message)
+                    record["extraction_errors"].append(message)
                 if args.mineru:
                     try:
                         single = work / "reference-input.pdf"
@@ -255,26 +276,31 @@ def main(argv=None):
                         record["reference"], record["unsupported_reference"] = mineru_tables(reference_dir)
                         record["comparison"] = compare([t["rows"] for t in record["actual"]], [t["rows"] for t in record["reference"]])
                     except Exception as error:
-                        record["errors"].append(f"reference: {type(error).__name__}: {error}")
-                status = record.get("comparison", {}).get("status", "not_requested")
-                record["status"] = "error" if record["errors"] else "inconclusive" if record["unsupported_reference"] else status
+                        message = f"reference: {type(error).__name__}: {error}"
+                        record["errors"].append(message)
+                        record["reference_errors"].append(message)
+                page_statuses(record, args.mineru)
                 (work / "result.json").write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
         except Exception as error:
             doc["errors"].append(f"{type(error).__name__}: {error}")
     statuses = [p["status"] for d in report["documents"] for p in d["pages"] if "status" in p]
     report["summary"] = {s: statuses.count(s) for s in sorted(set(statuses))}
+    for field in ("extraction", "comparison"):
+        values = [p[field + "_status"] for d in report["documents"] for p in d["pages"] if field + "_status" in p]
+        report[field + "_summary"] = {s: values.count(s) for s in sorted(set(values))}
+    report["document_error_count"] = sum(bool(d["errors"]) for d in report["documents"])
     errors = any(d["errors"] or any(p["errors"] for p in d["pages"]) for d in report["documents"])
     report["operational_errors"] = errors
     (output / "report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     with (output / "summary.csv").open("w", encoding="utf-8", newline="") as stream:
         writer = csv.writer(stream)
-        writer.writerow(["file", "page", "status", "actual_tables", "reference_tables", "unsupported_reference", "errors"])
+        writer.writerow(["file", "page", "status", "actual_tables", "reference_tables", "unsupported_reference", "errors", "extraction_status", "comparison_status"])
         for doc in report["documents"]:
             for page in doc["pages"]:
-                writer.writerow([doc["file"], page["page"], page.get("status", "error"), len(page["actual"]), len(page["reference"]), len(page["unsupported_reference"]), " ; ".join(page["errors"])])
+                writer.writerow([doc["file"], page["page"], page.get("status", "error"), len(page["actual"]), len(page["reference"]), len(page["unsupported_reference"]), " ; ".join(page["errors"]), page.get("extraction_status", "error"), page.get("comparison_status", "blocked" if args.mineru else "not_requested")])
             if doc["errors"]:
-                writer.writerow([doc["file"], "", "error", "", "", "", " ; ".join(doc["errors"])])
-    print(f"Report: {output}\nSummary: {json.dumps(report['summary'])}")
+                writer.writerow([doc["file"], "", "error", "", "", "", " ; ".join(doc["errors"]), "error", "blocked" if args.mineru else "not_requested"])
+    print(f"Report: {output}\nExtraction (pages): {json.dumps(report['extraction_summary'])}\nComparison (pages): {json.dumps(report['comparison_summary'])}\nDocument errors: {report['document_error_count']}")
     return 1 if errors else 2 if args.fail_on_difference and any(s in ("different", "inconclusive") for s in statuses) else 0
 
 
