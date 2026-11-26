@@ -24,3 +24,8 @@ fn main() -> omniattach_documents::Result<()> {
     println!("{json}");
     Ok(())
 }
+#[cfg(not(feature = "pdf"))]
+fn main() {
+    eprintln!("pdf-inspect requires --features pdf");
+    std::process::exit(1);
+}

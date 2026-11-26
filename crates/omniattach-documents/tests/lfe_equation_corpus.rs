@@ -1,5 +1,6 @@
 #![cfg(feature = "pdf")]
-//! Opt-in integration checks against the independently generated LFE-4A corpus.
+//! Opt-in checks against the equation corpus from `scripts/equations/fixtures.py`.
+//! See scripts/README.md; run with `OMNIATTACH_EQUATION_CORPUS=DIR ... -- --ignored`.
 use omniattach_documents::*;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -11,10 +12,9 @@ struct Corpus {
 }
 impl Corpus {
     fn load() -> Self {
-        let root = PathBuf::from(
-            std::env::var_os("OMNIATTACH_EQUATION_CORPUS")
-                .expect("set OMNIATTACH_EQUATION_CORPUS to a validated LFE-4A directory"),
-        );
+        let root = PathBuf::from(std::env::var_os("OMNIATTACH_EQUATION_CORPUS").expect(
+            "set OMNIATTACH_EQUATION_CORPUS to a directory made by scripts/equations/fixtures.py",
+        ));
         let manifest: Value =
             serde_json::from_slice(&std::fs::read(root.join("manifest.json")).unwrap()).unwrap();
         assert_eq!(
@@ -90,7 +90,7 @@ fn check_bounds(actual: PdfBounds, expected: &Value) {
 }
 
 #[test]
-#[ignore = "requires generated LFE-4A corpus; run the dedicated workflow or documented command"]
+#[ignore = "needs OMNIATTACH_EQUATION_CORPUS (scripts/equations/fixtures.py)"]
 fn corpus_inspection_retains_source_pages_sequences_and_hint_references() {
     let c = Corpus::load();
     for entry in c.manifest["documents"].as_array().unwrap() {
@@ -151,7 +151,7 @@ fn corpus_inspection_retains_source_pages_sequences_and_hint_references() {
 }
 
 #[test]
-#[ignore = "requires generated LFE-4A corpus"]
+#[ignore = "needs OMNIATTACH_EQUATION_CORPUS"]
 fn raster_equations_match_independent_pixels_bounds_and_prose_order() {
     let c = Corpus::load();
     let bytes = c.bytes("raster.pdf");
@@ -212,7 +212,7 @@ fn raster_equations_match_independent_pixels_bounds_and_prose_order() {
 }
 
 #[test]
-#[ignore = "requires generated LFE-4A corpus"]
+#[ignore = "needs OMNIATTACH_EQUATION_CORPUS"]
 fn reuse_and_transforms_keep_occurrences_distinct_without_rotating_asset_pixels() {
     let c = Corpus::load();
     for name in ["repeated.pdf", "transformed.pdf", "page-transform.pdf"] {
@@ -261,7 +261,7 @@ fn reuse_and_transforms_keep_occurrences_distinct_without_rotating_asset_pixels(
 }
 
 #[test]
-#[ignore = "requires generated LFE-4A corpus"]
+#[ignore = "needs OMNIATTACH_EQUATION_CORPUS"]
 fn scans_are_page_images_and_outlines_are_not_fabricated_formula_assets() {
     let c = Corpus::load();
     for name in ["scanned.pdf", "outlines.pdf"] {
@@ -291,7 +291,7 @@ fn scans_are_page_images_and_outlines_are_not_fabricated_formula_assets() {
 }
 
 #[test]
-#[ignore = "requires generated LFE-4A corpus"]
+#[ignore = "needs OMNIATTACH_EQUATION_CORPUS"]
 fn ordinary_extraction_stays_independent_and_corpus_pdf_bytes_are_preserved() {
     let c = Corpus::load();
     for name in ["raster.pdf", "repeated.pdf", "negatives.pdf"] {

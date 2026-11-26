@@ -29,3 +29,6 @@ omniattach = { path = "../omniattach", version = "0.3.0", default-features = fal
 
 [dev-dependencies]
 tempfile = "3"
+
+[lints]
+workspace = true

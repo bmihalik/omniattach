@@ -1,9 +1,7 @@
 //! Bounded best-effort projection of DRM-free MOBI text through the HTML reader.
 use crate::{Document, Error, Format, Options, Result};
 
-#[path = "ebook_flows.rs"]
 mod flows;
-#[path = "ebook_huff.rs"]
 mod huff;
 
 fn invalid(message: &str) -> Error {

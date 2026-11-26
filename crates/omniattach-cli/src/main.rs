@@ -8,7 +8,10 @@ use std::io::Write;
 
 fn run(cli: &Cli) -> omniattach_cli::Result<()> {
     let config = EngineConfig::from_cli(cli)?;
-    let inspect = matches!(cli.command, Command::Probe(_) | Command::XmlProbe(_) | Command::PdfTables(_) | Command::PdfTable(_));
+    let inspect = matches!(
+        cli.command,
+        Command::Probe(_) | Command::XmlProbe(_) | Command::PdfTables(_) | Command::PdfTable(_)
+    );
     let (engine, runtime): (Box<dyn Engine>, Runtime) = if inspect {
         // These commands do not construct a conversion engine or probe tools/models.
         (Box::new(InspectionOnlyEngine), Runtime::default())

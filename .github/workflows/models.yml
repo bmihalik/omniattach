@@ -1,0 +1,26 @@
+# SPDX-FileCopyrightText: 2026 Bela Istvan MIHALIK
+# SPDX-License-Identifier: Apache-2.0
+
+# Offline model-store and provisioning checks (no downloads).
+name: Models
+
+on:
+  workflow_dispatch:
+  push:
+    paths: ['crates/omniattach/**', '.github/workflows/models.yml']
+  pull_request:
+    paths: ['crates/omniattach/**', '.github/workflows/models.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  offline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test --locked -p omniattach --features workspace --test model_store --test model_progress
+      - run: cargo test --locked -p omniattach --features backends --example provision-equation-model
+      - run: cargo check --locked -p omniattach --no-default-features

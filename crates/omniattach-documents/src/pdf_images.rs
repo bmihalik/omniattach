@@ -5,9 +5,7 @@ use crate::{
 };
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
-#[path = "pdf_raster.rs"]
 mod raster;
-#[path = "pdf_image_text.rs"]
 mod text;
 
 /// Experimental line-aware text and image-occurrence projection, enabled by `pdf`.

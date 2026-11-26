@@ -33,3 +33,6 @@ required-features = ["backends"]
 [[example]]
 name = "provision-equation-model"
 required-features = ["backends"]
+
+[lints]
+workspace = true

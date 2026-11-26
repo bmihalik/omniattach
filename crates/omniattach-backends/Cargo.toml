@@ -23,3 +23,6 @@ libc = "0.2"
 [[example]]
 name = "backends-convert"
 path = "examples/convert.rs"
+
+[lints]
+workspace = true

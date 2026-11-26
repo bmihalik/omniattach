@@ -9,7 +9,7 @@ Version 0.3.0. Local document extraction into typed blocks, tables, diagnostics 
 | Text/source/Markdown/HTML/CSV/TSV/JSON | None | Text, code, semantic blocks and supported tables |
 | XML | None | Explicit namespace-aware record/column mapping, not automatic schema inference |
 | DOCX/PPTX/ODF/EPUB/workbooks | office | Package/document parsing; format-specific diagnostics describe losses |
-| PDF | pdf | Page text, bookmark headings, supported embedded images; no general layout/table reconstruction |
+| PDF | pdf | Page text, bookmark headings, supported embedded images; opt-in tables, images and equations (see docs/PDF-ELEMENTS.md) |
 | EPUB | epub or office | Existing spine-ordered text/table extraction; epub aliases office |
 | MOBI | mobi | DRM-free uncompressed, PalmDOC and HUFF/CDIC text projection |
 | AZW3 | azw3 | Experimental KF8 primary-flow HTML projection; implies mobi |
@@ -44,13 +44,15 @@ Document::to_json retains the canonical model, Document::to_text renders text an
 
 MOBI/AZW3 readers validate record tables, reject encryption, strip supported extra-data/overlap trailers and bound decompression. HUFF/CDIC decoding checks dictionary indices, recursion and work. KF8 uses a referenced FDST table to validate the whole decoded stream and select the primary flow; secondary-flow omission is diagnosed.
 
-This is not full KF8 reconstruction: skeletons/fragments, hybrid boundaries, navigation, images, fonts, CSS and link targets are not reconstructed. Successful extraction does not guarantee completeness or reading order for every book. See [docs/AZW3.md](docs/AZW3.md) and the [main CLI ebook guide](../omniattach-cli/docs/EBOOKS.md). The raw mobi dependency remains optional; bounded text decoding is implemented locally rather than invoking its unbounded decompression path.
+This is not full KF8 reconstruction: skeletons/fragments, hybrid boundaries, navigation, images, fonts, CSS and link targets are not reconstructed. Successful extraction does not guarantee completeness or reading order for every book. See [docs/AZW3.md](docs/AZW3.md) and the [main CLI ebook guide](../omniattach-cli/docs/EBOOKS.md). MOBI decoding is implemented locally with bounded decompression; no third-party MOBI crate is used.
 
 ## PDF
 
 A targeted compatibility shim normalizes real-valued TJ word gaps using lopdf's existing integer-spacing heuristic. It avoids inserting literal font-encoded space bytes and preserves small kerning adjustments. It is not full position-aware layout reconstruction. Original input bytes and SHA-256 remain unchanged.
 
 Bookmarks are emitted as headings before page text; named destinations are not fully resolved. A PdfOcr callback may recognize otherwise empty pages; the document crate does not itself launch an OCR binary. The facade can supply its supported external OCR path. Supported embedded JPEG/JP2 assets are retained; other encodings may be skipped with diagnostics.
+
+Opt-in PDF element extraction (inspection, images, equations, ruled tables) is described in [docs/PDF-ELEMENTS.md](docs/PDF-ELEMENTS.md).
 
 ## XML, provenance and limits
 

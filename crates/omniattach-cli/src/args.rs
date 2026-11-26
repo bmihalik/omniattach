@@ -59,7 +59,10 @@ pub struct PdfTableArgs {
     pub output_format: TableOutputFormat,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
-pub enum TableOutputFormat { Json, Markdown }
+pub enum TableOutputFormat {
+    Json,
+    Markdown,
+}
 #[derive(Debug, Args)]
 pub struct ProbeArgs {
     pub input: PathBuf,

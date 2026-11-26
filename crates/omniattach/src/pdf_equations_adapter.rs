@@ -167,13 +167,11 @@ impl Converter for EquationConverter {
             let BlockKind::Image { asset_id } = &block.kind else {
                 unreachable!()
             };
-            if let Some(asset) = doc.assets.iter().find(|a| a.id == *asset_id) {
-                if matches!(asset.media_type.as_str(), "image/png" | "image/jpeg")
-                    && asset.bytes.len() <= limits.max_image_bytes
-                {
-                    images
-                        .push(json!({"id":block.id,"path":input.output_dir.join(&asset.filename)}));
-                }
+            if let Some(asset) = doc.assets.iter().find(|a| a.id == *asset_id)
+                && matches!(asset.media_type.as_str(), "image/png" | "image/jpeg")
+                && asset.bytes.len() <= limits.max_image_bytes
+            {
+                images.push(json!({"id":block.id,"path":input.output_dir.join(&asset.filename)}));
             }
         }
         let mut predictions = BTreeMap::new();
@@ -214,8 +212,10 @@ impl Converter for EquationConverter {
             command
                 .env
                 .extend(self.config.env.iter().map(|(k, v)| (k.into(), v.into())));
-            let mut run = RunOptions::default();
-            run.timeout = Duration::from_millis(self.config.timeout_ms);
+            let mut run = RunOptions {
+                timeout: Duration::from_millis(self.config.timeout_ms),
+                ..Default::default()
+            };
             if let Some(left) = job.remaining() {
                 run.timeout = run.timeout.min(left);
             }

@@ -108,8 +108,10 @@ fn corrupt_cache_is_not_accepted() {
 }
 #[test]
 fn token_debug_is_redacted() {
-    let mut options = ProvisionOptions::default();
-    options.token = Some("SUPER_SECRET".into());
+    let options = ProvisionOptions {
+        token: Some("SUPER_SECRET".into()),
+        ..Default::default()
+    };
     assert!(!format!("{options:?}").contains("SUPER_SECRET"));
 }
 #[test]
@@ -118,8 +120,10 @@ fn cancellation_and_byte_limits_apply_to_cached_data() {
     let s = spec();
     cached(tmp.path(), &s);
     let store = ModelStore::new(tmp.path()).unwrap();
-    let mut options = ProvisionOptions::default();
-    options.max_file_bytes = 1;
+    let options = ProvisionOptions {
+        max_file_bytes: 1,
+        ..Default::default()
+    };
     assert!(matches!(store.verify(&s, &options), Err(Error::Limit(_))));
     let options = ProvisionOptions::default();
     options.cancellation.cancel();

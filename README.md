@@ -50,6 +50,7 @@ Registration and execution permission are separate. Legacy DOC/RTF/PPT requests 
 - [PUBLISHING.md](PUBLISHING.md): versions, lockfile preparation and publication order.
 - [CLI README](crates/omniattach-cli/README.md) and [ebook CLI guide](crates/omniattach-cli/docs/EBOOKS.md).
 - [Document library](crates/omniattach-documents/README.md) and [AZW3 limitations](crates/omniattach-documents/docs/AZW3.md).
+- [PDF elements](crates/omniattach-documents/docs/PDF-ELEMENTS.md): opt-in tables, images and equations; [scripts](scripts/README.md) for corpus testing.
 
 Resource limits are not an OS sandbox. Use isolated, resource-limited workers for hostile inputs. No automatic converter/model downloads or silent converter fallback are included.
 

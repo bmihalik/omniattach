@@ -17,7 +17,7 @@ use std::{
 };
 fn fixture() -> Vec<u8> {
     let content = b"q 10 0 0 10 0 0 cm /Im Do Q q 10 0 0 10 20 0 cm /Im Do Q";
-    let objects=vec![b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),b"<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 100 100] >>".to_vec(),b"<< /Type /Page /Parent 2 0 R /Resources << /XObject << /Im 4 0 R >> >> /Contents 5 0 R >>".to_vec(),b"<< /Type /XObject /Subtype /Image /Width 1 /Height 1 /ColorSpace /DeviceRGB /BitsPerComponent 8 /Length 3 >>\nstream\nABC\nendstream".to_vec(),[format!("<< /Length {} >>\nstream\n",content.len()).into_bytes(),content.to_vec(),b"\nendstream".to_vec()].concat()];
+    let objects=[b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),b"<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 100 100] >>".to_vec(),b"<< /Type /Page /Parent 2 0 R /Resources << /XObject << /Im 4 0 R >> >> /Contents 5 0 R >>".to_vec(),b"<< /Type /XObject /Subtype /Image /Width 1 /Height 1 /ColorSpace /DeviceRGB /BitsPerComponent 8 /Length 3 >>\nstream\nABC\nendstream".to_vec(),[format!("<< /Length {} >>\nstream\n",content.len()).into_bytes(),content.to_vec(),b"\nendstream".to_vec()].concat()];
     let mut bytes = b"%PDF-1.5\n".to_vec();
     let mut offsets = vec![0];
     for (i, object) in objects.iter().enumerate() {

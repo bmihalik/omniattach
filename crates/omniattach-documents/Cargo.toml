@@ -14,7 +14,7 @@ exclude = ["target/", ".git/"]
 default = []
 office = ["dep:calamine", "dep:zip"]
 pdf = ["dep:lopdf", "dep:deunicode", "dep:png"]
-mobi = ["dep:mobi"]
+mobi = []
 azw3 = ["mobi"]
 # EPUB currently shares the existing Office package reader.
 epub = ["office"]
@@ -34,7 +34,6 @@ percent-encoding = "2"
 zip = { version = "9.1", default-features = false, features = ["deflate"] , optional = true }
 calamine = { version = "0.37", optional = true }
 lopdf = { version = "0.46", default-features = false, optional = true }
-mobi = { version = "0.8", default-features = false, optional = true }
 deunicode = { version = "1.6", optional = true }
 png = { version = "0.17", optional = true }
 
@@ -49,3 +48,6 @@ path = "examples/convert.rs"
 name = "azw3-extract"
 path = "examples/azw3-extract.rs"
 required-features = ["azw3"]
+
+[lints]
+workspace = true

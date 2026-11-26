@@ -1,0 +1,58 @@
+# SPDX-FileCopyrightText: 2026 Bela Istvan MIHALIK
+# SPDX-License-Identifier: Apache-2.0
+
+# PDF element extraction (tables, images, equations) beyond the main CI:
+# Python tooling tests, the generated equation corpus and the isolated worker.
+name: PDF elements
+
+on:
+  workflow_dispatch:
+  push:
+    paths: ['crates/omniattach-documents/**', 'scripts/**', 'tools/**', '.github/workflows/pdf-elements.yml']
+  pull_request:
+    paths: ['crates/omniattach-documents/**', 'scripts/**', 'tools/**', '.github/workflows/pdf-elements.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  python-tools:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r scripts/equations/requirements.txt
+      - name: Unit tests (no models, no Rust build)
+        run: |
+          for dir in tables equations images; do
+            python -m unittest discover -s "scripts/$dir" -p 'test_*.py' -v
+          done
+
+  equation-corpus:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: dtolnay/rust-toolchain@stable
+      - run: python -m pip install -r scripts/equations/requirements.txt
+      - run: python scripts/equations/fixtures.py "$RUNNER_TEMP/equations"
+      - run: python scripts/equations/validate_fixtures.py "$RUNNER_TEMP/equations"
+      - name: Rust extraction against the generated PDFs
+        env:
+          OMNIATTACH_EQUATION_CORPUS: ${{ runner.temp }}/equations
+        run: cargo test --locked -p omniattach-documents --features pdf --test lfe_equation_corpus -- --ignored
+
+  formula-worker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Compile the isolated Bobine worker and example (no inference)
+        run: cargo check --manifest-path tools/lfe-formula-bobine/Cargo.toml --all-targets

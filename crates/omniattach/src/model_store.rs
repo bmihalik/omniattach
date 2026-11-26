@@ -223,6 +223,7 @@ struct Events<'a> {
     aggregate: Cell<u64>,
 }
 impl Events<'_> {
+    #[allow(clippy::too_many_arguments)]
     fn emit(
         &self,
         stage: ModelProvisionStage,
@@ -256,6 +257,7 @@ impl Events<'_> {
         });
     }
 }
+#[allow(clippy::too_many_arguments)]
 async fn guarded<T>(
     future: impl Future<Output = Result<T>>,
     o: &ProvisionOptions,
@@ -489,25 +491,24 @@ impl ModelStore {
             None,
             None,
         );
-        if !o.refresh {
-            match self.cached_revision(s)? {
-                Some(revision) => match self.snapshot(s, &revision, o, e.start) {
-                    Ok(model) => {
-                        e.emit(
-                            ModelProvisionStage::CacheHit,
-                            &revision,
-                            None,
-                            0,
-                            0,
-                            None,
-                            None,
-                        );
-                        return Ok(model);
-                    }
-                    Err(Error::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {}
-                    Err(error) => return Err(error),
-                },
-                None => {}
+        if !o.refresh
+            && let Some(revision) = self.cached_revision(s)?
+        {
+            match self.snapshot(s, &revision, o, e.start) {
+                Ok(model) => {
+                    e.emit(
+                        ModelProvisionStage::CacheHit,
+                        &revision,
+                        None,
+                        0,
+                        0,
+                        None,
+                        None,
+                    );
+                    return Ok(model);
+                }
+                Err(Error::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error),
             }
         }
         if !o.allow_network {

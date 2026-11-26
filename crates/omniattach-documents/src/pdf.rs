@@ -1,7 +1,6 @@
 use crate::{BlockKind, Diagnostic, Document, Error, Options, Result, Source, SourceSpan};
 use std::collections::{BTreeMap, BTreeSet};
-#[path = "pdf_spacing.rs"]
-mod lines;
+pub(crate) mod lines;
 pub use lines::{PdfBounds, PdfElement, PdfElementAnchor, PdfElementKind};
 const MAX_OUTLINE_ITEMS: usize = 10_000;
 const MAX_OUTLINE_DEPTH: u32 = 32;

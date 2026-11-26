@@ -21,6 +21,8 @@ Default features include the facade and documents, including Office, PDF, EPUB, 
 | xml-probe INPUT | Namespace-aware XML structure, without text/attribute values |
 | plan INPUT | Advisory route selection; legacy permitted Office requests may probe LibreOffice |
 | convert INPUT --output NEW_DIR | Convert, durably export and print the result |
+| pdf-tables INPUT --page N | List table candidates on a PDF page (JSON) |
+| pdf-table INPUT --page N --candidate K | Convert one candidate (JSON, or `--output-format markdown`) |
 
 ```sh
 omniattach capabilities --pretty
@@ -32,6 +34,18 @@ omniattach convert renamed.bin --format azw3 --output explicit-export
 ```
 
 MOBI/AZW3 use the in-process documents route: no external flags or Calibre required. The library's HUFF/CDIC, trailer and FDST handling and its limitations remain unchanged. Inspect document.json diagnostics and manifest warnings. Successful text recovery is not full KF8 reconstruction. See [docs/EBOOKS.md](docs/EBOOKS.md).
+
+## PDF elements
+
+Tables, images and equations are opt-in; ordinary `--goal markdown` output is unchanged.
+
+```sh
+omniattach pdf-tables report.pdf --page 2 --pretty
+omniattach pdf-table report.pdf --page 2 --candidate 1 --output-format markdown
+omniattach convert report.pdf --goal custom:pdf-images --output report-images
+```
+
+`pdf-tables`/`pdf-table` write only to stdout and accept `--max-input-bytes` and `--max-output-bytes`. Equation recognition (`custom:pdf-equations`) needs a `workspace` build, `--external-backends`, `--allow-external` and a worker configured through `OMNIATTACH_PDF_EQUATION_WORKER_CONFIG`. See [PDF elements](../omniattach-documents/docs/PDF-ELEMENTS.md).
 
 ## External conversion
 

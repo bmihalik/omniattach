@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### PDF elements cleanup
+
+- Tables: one shared path scanner for all detectors and one text-to-cell converter for plain and merged-cell grids (previously duplicated). Discovered grids, Markdown and source sequences are unchanged on a 950-page old-vs-new comparison.
+- Tables API: candidates gain `detector` (`stroked_grid`, `filled_grid`, `open_rows`); `PdfTableGrid` and conversion results carry `cell_spans`; discovery schema is always `omniattach/pdf-table-discovery/0.2`. Shorter warnings and unified "text crosses grid boundary" errors. The low-level `pdf_tables::{Run, convert}` exports and the `pdf-ruled-table` example are removed (use the CLI).
+- PDF text: the image projection reuses the ordinary line builder instead of a copy. Source modules use a normal directory layout instead of `#[path]` attributes.
+- Tests: table end-to-end checks moved from Python into `cargo test`; real-sample regressions are `#[ignore]` tests driven by environment variables.
+- Docs and tooling: the step-by-step LFE notes are replaced by `crates/omniattach-documents/docs/PDF-ELEMENTS.md` and `scripts/README.md`; scripts are grouped into `tables/`, `equations/` and `images/`; the finished equation-recognition research scripts are removed; 14 workflows are reduced to `ci.yml`, `pdf-elements.yml` and `models.yml`.
+- Workspace: unused `[workspace.dependencies]` and the unused `mobi` crate dependency are removed; crates inherit workspace lints; formatting and Clippy warnings are fixed.
+
 - Move line-end de-hyphenation into omniattach-documents as a single structured-document post-extraction pass for paragraphs, list items and quotes, including OCR and cross-page PDF paragraphs. Code, headings and tables remain unchanged.
 - Add public dehyphenate_text and Stats { joined, skipped_long }; protect fenced code/table rows for direct text/Markdown helper calls.
 - Add Options::dehyphenate_max_tokens (default 6; 0 disables), facade JSON option validation in 0..=64 and CLI --dehyphenate-max-tokens. Duplicate CLI/JSON settings are errors.
