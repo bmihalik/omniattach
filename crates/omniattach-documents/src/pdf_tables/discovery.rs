@@ -9,12 +9,17 @@ use std::{io::Read,path::Path};
 type Point=[f64;2];
 type Matrix=[f64;6];
 const ID: Matrix=[1.,0.,0.,1.,0.,0.];
+/// Zero-based, top-down cell anchor and extent. Current fallback uses row spans only.
+#[derive(Clone,Debug,Serialize,Deserialize,PartialEq,Eq)]
+pub struct PdfTableSpan { pub row:usize,pub column:usize,pub row_span:usize,pub column_span:usize }
 #[derive(Clone,Debug,Serialize,Deserialize,PartialEq)]
 pub struct PdfTableCandidate {
     pub candidate: usize,
     pub page: u32,
     pub x_boundaries: Vec<f64>,
     pub y_boundaries: Vec<f64>,
+    #[serde(default,skip_serializing_if="Vec::is_empty")]
+    pub cell_spans: Vec<PdfTableSpan>,
 }
 #[derive(Clone,Debug,Serialize,Deserialize,PartialEq)]
 pub struct PdfTableDiscovery {
@@ -83,7 +88,7 @@ fn discover(content:Content,page:u32,options:&Options)->Result<Vec<PdfTableCandi
                 if !bad && matches!(op.operator.as_str(),"S"|"s") {
                     if let Some((xs,ys))=grid(&segments) {
                         if candidates.len()>=128.min(options.limits.blocks) { return Err(Error::LimitExceeded("table candidates".into())); }
-                        candidates.push(PdfTableCandidate { candidate:candidates.len()+1,page,x_boundaries:xs,y_boundaries:ys });
+                        candidates.push(PdfTableCandidate { candidate:candidates.len()+1,page,x_boundaries:xs,y_boundaries:ys,cell_spans:Vec::new() });
                     }
                 }
                 segments.clear(); current=None; start=None; bad=false;
@@ -121,8 +126,11 @@ pub fn discover_pdf_tables_bytes(name:&str,bytes:&[u8],page:u32,options:&Options
     let content=Content::decode(&data).map_err(|e|Error::Parse(e.to_string()))?;
     let is_filled=filled_content(&content);
     let candidates=discover(content,page,options)?;
-    let warning=if is_filled { "Thin filled rectangles only (<=2 units), 0.8-unit join tolerance; rectangular clips must contain every band; section spans split into separate rectangular candidates; first row is formatting, not a semantic header; paint visibility not verified; no mixed strokes, XObjects or continuation" } else { "Page-content S/s grids only; no XObjects, clipping, continuation or normalized page geometry" };
-    Ok(PdfTableDiscovery { schema_version:"omniattach/pdf-table-discovery/0.1".into(),source:name.into(),source_sha256:format!("{:x}",Sha256::digest(bytes)),page,candidates,warnings:vec![warning.into()] })
+    let has_spans=candidates.iter().any(|c|!c.cell_spans.is_empty());
+    let warning=if has_spans { "Open-sided filled-rule fallback; cell_spans are zero-based top-down anchors; outer x limits inferred from repeated horizontal-rule endpoints; row spans only; no column spans or cross-page joins; read discovery alongside conversion; paint visibility not verified" }
+        else if is_filled { "Thin filled rectangles only (<=2 units), 0.8-unit join tolerance; rectangular clips must contain every band; section spans split into separate rectangular candidates; first row is formatting, not a semantic header; paint visibility not verified; no mixed strokes, XObjects or continuation" }
+        else { "Page-content S/s grids only; no XObjects, clipping, continuation or normalized page geometry" };
+    Ok(PdfTableDiscovery { schema_version:(if has_spans {"omniattach/pdf-table-discovery/0.2"} else {"omniattach/pdf-table-discovery/0.1"}).into(),source:name.into(),source_sha256:format!("{:x}",Sha256::digest(bytes)),page,candidates,warnings:vec![warning.into()] })
 }
 /// Path variant; reads input once with the configured size limit.
 pub fn discover_pdf_tables(path:impl AsRef<Path>,page:u32,options:&Options)->Result<PdfTableDiscovery> {
@@ -135,7 +143,8 @@ pub fn convert_pdf_table_bytes(name:&str,bytes:&[u8],page:u32,candidate:usize,op
     let discovery=discover_pdf_tables_bytes(name,bytes,page,options)?;
     let selected=discovery.candidates.get(index).ok_or_else(||invalid("candidate not found"))?;
     let report=crate::inspect_pdf_bytes(name,bytes,options)?;
-    let mut result=convert_inspection(&report,&PdfTableGrid { page,x_boundaries:selected.x_boundaries.clone(),y_boundaries:selected.y_boundaries.clone() },options)?;
+    let mut result=if selected.cell_spans.is_empty() { convert_inspection(&report,&PdfTableGrid { page,x_boundaries:selected.x_boundaries.clone(),y_boundaries:selected.y_boundaries.clone() },options)? }
+        else { filled::convert_spans(&report,selected,options)? };
     result.warnings.extend(discovery.warnings);
     Ok(result)
 }
@@ -162,7 +171,9 @@ pub fn convert_pdf_table(path:impl AsRef<Path>,page:u32,candidate:usize,options:
         let mut o=Options::default(); o.limits.input_bytes=0;
         assert!(matches!(discover_pdf_tables_bytes("x",b"x",1,&o),Err(Error::LimitExceeded(_))));
     }
-    #[test] fn zero_candidate_rejected() {
-        assert!(convert_pdf_table_bytes("x",b"",1,0,&Options::default()).is_err());
+    #[test] fn zero_candidate_rejected() { assert!(convert_pdf_table_bytes("x",b"",1,0,&Options::default()).is_err()); }
+    #[test] fn old_candidate_json_defaults_to_no_spans() {
+        let c:PdfTableCandidate=serde_json::from_str(r#"{"candidate":1,"page":1,"x_boundaries":[0,10],"y_boundaries":[0,10]}"#).unwrap();
+        assert!(c.cell_spans.is_empty());
     }
 }

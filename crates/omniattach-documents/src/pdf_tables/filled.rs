@@ -1,5 +1,6 @@
-//! Filled thin-rectangle borders, with safe rectangular clips and band splitting.
+//! Filled thin-rectangle borders, safe rectangular clips and bounded band discovery.
 use super::*;
+#[path="open_rows.rs"] mod open_rows;
 type Rect=[f64;4];
 const T:f64=0.8;
 #[derive(Clone,Copy,Debug)]
@@ -59,7 +60,7 @@ fn assemble(lines:Vec<Line>,page:u32,options:&Options)->Result<Vec<PdfTableCandi
             if let Some((xs,ys))=pending.take() {
                 if output.len()>=128.min(options.limits.blocks) { return Err(Error::LimitExceeded("table candidates".into())); }
                 if (xs.len()-1)*(ys.len()-1)>options.limits.cells.min(16384) { return Err(Error::LimitExceeded("table cells".into())); }
-                output.push(PdfTableCandidate {candidate:0,page,x_boundaries:xs,y_boundaries:ys});
+                output.push(PdfTableCandidate {candidate:0,page,x_boundaries:xs,y_boundaries:ys,cell_spans:Vec::new()});
             }
             Ok(())
         };
@@ -81,9 +82,14 @@ fn assemble(lines:Vec<Line>,page:u32,options:&Options)->Result<Vec<PdfTableCandi
         }
         flush(&mut pending,&mut output)?;
     }
+    // Preserve legacy closed-grid discovery. Only try open sides if it found none.
+    if output.is_empty() { return open_rows::assemble(&lines,page,options); }
     output.sort_by(|a,b|b.y_boundaries.last().unwrap().total_cmp(a.y_boundaries.last().unwrap()).then(a.x_boundaries[0].total_cmp(&b.x_boundaries[0])));
     for (index,c) in output.iter_mut().enumerate() { c.candidate=index+1; }
     Ok(output)
+}
+pub(super) fn convert_spans(report:&crate::PdfInspection,candidate:&PdfTableCandidate,options:&Options)->Result<PdfTableConversion> {
+    open_rows::convert_inspection(report,candidate,options)
 }
 pub(super) fn discover(content:Content,page:u32,options:&Options)->Result<Vec<PdfTableCandidate>> {
     if content.operations.len()>options.limits.xml_nodes as usize { return Err(Error::LimitExceeded("content operations".into())); }
@@ -162,9 +168,7 @@ pub(super) fn discover(content:Content,page:u32,options:&Options)->Result<Vec<Pd
         assert_eq!(g[1].x_boundaries.len(),3); assert_eq!(g[1].y_boundaries.len(),3);
     }
     #[test] fn rejects_cut_border_and_complex_clip() {
-        for text in [filled().replace("0 0 100 100", "20 0 80 100"),filled().replace("0 0 100 100 re W", "0 0 m 50 0 l 25 100 l h W")] {
-            assert!(discover(Content::decode(text.as_bytes()).unwrap(),1,&Options::default()).is_err());
-        }
+        for text in [filled().replace("0 0 100 100", "20 0 80 100"),filled().replace("0 0 100 100 re W", "0 0 m 50 0 l 25 100 l h W")] { assert!(discover(Content::decode(text.as_bytes()).unwrap(),1,&Options::default()).is_err()); }
     }
     #[test] fn duplicate_rectangles_do_not_duplicate_tables() {
         let s=filled(); let twice=s.clone()+&s;
