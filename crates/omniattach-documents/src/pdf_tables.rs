@@ -1,7 +1,10 @@
 //! Opt-in native-text table extraction, separate from ordinary extraction.
 //!
 //! Two steps, both model-free:
-//! 1. [`discovery`] finds candidate grids from vector rulings on one page.
+//! 1. [`discovery`] finds candidate grids on one page: strict detectors for
+//!    ruled grids first, then a layout detector (rules plus text alignment,
+//!    also for rotated tables). [`ocr`] runs the layout detector on OCR words
+//!    and raster rulings of scanned pages.
 //! 2. [`convert_inspection`] assigns inspected text runs to the grid cells and
 //!    renders Markdown.
 //!
@@ -15,8 +18,12 @@ mod cell_lines;
 mod convert;
 pub mod discovery;
 mod filled;
+mod frame;
+mod layout;
+pub mod ocr;
 mod open_rows;
 mod paths;
+mod rules;
 mod stroked;
 
 pub use convert::convert_inspection;
@@ -48,6 +55,36 @@ pub struct PdfTableGrid {
     /// Merged cells. Empty means every cell is 1x1.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub cell_spans: Vec<PdfTableSpan>,
+    /// Reading frame: 0, or 90/270 for tables whose text runs up/down the
+    /// page. Boundaries are then in the page rotated so that text is upright:
+    /// 90 maps `(x, y)` to `(y, -x)`, 270 maps it to `(-y, x)`.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub rotation: u16,
+    #[serde(default, skip_serializing_if = "PdfTextAssignment::is_contained")]
+    pub text_assignment: PdfTextAssignment,
+}
+
+/// How [`convert_inspection`] places text runs into cells.
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum PdfTextAssignment {
+    /// A run must fit its column; crossing a boundary is an error. Used for
+    /// ruled grids, whose boundaries are drawn.
+    #[default]
+    Contained,
+    /// A run goes to the cell containing its centre; runs centred outside the
+    /// grid are skipped. Used when boundaries are inferred from layout.
+    Centre,
+}
+
+impl PdfTextAssignment {
+    fn is_contained(&self) -> bool {
+        *self == Self::Contained
+    }
+}
+
+fn is_zero(n: &u16) -> bool {
+    *n == 0
 }
 
 /// A merged cell: zero-based, top-down anchor plus its extent in grid slots.

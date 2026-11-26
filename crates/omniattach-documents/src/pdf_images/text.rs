@@ -123,6 +123,7 @@ mod tests {
             }),
             text: text.map(str::to_owned),
             word_gap_before: false,
+            text_rotation: None,
             pixel_size: None,
             derived_from: Vec::new(),
             evidence: Vec::new(),

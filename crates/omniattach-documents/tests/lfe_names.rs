@@ -28,6 +28,7 @@ fn inspection(name: &str, kinds: &[PdfElementKind]) -> PdfInspection {
                 bounds: None,
                 text: None,
                 word_gap_before: false,
+                text_rotation: None,
                 pixel_size: None,
                 derived_from: vec![],
                 evidence: vec![],

@@ -203,6 +203,8 @@ fn candidate(
         x_boundaries: xs,
         y_boundaries: ys,
         cell_spans: spans,
+        rotation: 0,
+        text_assignment: Default::default(),
     }))
 }
 

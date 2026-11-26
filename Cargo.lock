@@ -1412,6 +1412,7 @@ dependencies = [
  "clap",
  "ctrlc",
  "omniattach",
+ "omniattach-backends",
  "quick-xml 0.40.1",
  "serde",
  "serde_json",

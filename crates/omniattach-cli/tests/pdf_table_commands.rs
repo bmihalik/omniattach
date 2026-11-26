@@ -236,8 +236,47 @@ mod binary {
             "INVALID_INPUT",
             3,
         );
+    }
+
+    #[test]
+    fn clipped_page_falls_back_to_the_layout_detector() {
         let clipped = Fixture::new(&format!("0 0 600 600 re W n\n{GRID}{TEXT}"));
-        failure(&clipped.run("pdf-tables", &[]), "INVALID_INPUT", 3);
+        let listed: Value =
+            serde_json::from_str(&success(&clipped.run("pdf-tables", &[]))).unwrap();
+        assert_eq!(listed["candidates"][0]["detector"], "layout");
+        let markdown = success(&clipped.run(
+            "pdf-table",
+            &["--candidate", "1", "--output-format", "markdown"],
+        ));
+        assert_eq!(markdown, EXPECTED);
+    }
+
+    /// Needs pdftoppm and tesseract on PATH and the scanned sample.
+    #[test]
+    #[ignore = "needs OMNIATTACH_TABLE_SAMPLES with 11-starcraft.pdf, pdftoppm and tesseract"]
+    fn ocr_reads_a_scanned_table() {
+        let dir = std::path::PathBuf::from(std::env::var("OMNIATTACH_TABLE_SAMPLES").unwrap());
+        let output = Command::new(env!("CARGO_BIN_EXE_omniattach"))
+            .arg("pdf-table")
+            .arg(dir.join("11-starcraft.pdf"))
+            .args([
+                "--page",
+                "1",
+                "--candidate",
+                "1",
+                "--ocr",
+                "--output-format",
+                "markdown",
+            ])
+            .output()
+            .unwrap();
+        let markdown = success(&output);
+        assert!(
+            markdown.starts_with(
+                "| Armor Name | Class | Damage Resistance | Defense Modifier | Cost |"
+            )
+        );
+        assert!(markdown.contains("| Flak Armor | Heavy | 6 damage resistance | -2 | 500 |"));
     }
 
     #[test]

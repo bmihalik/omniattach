@@ -47,6 +47,16 @@ pub struct PdfTablesArgs {
     pub max_input_bytes: u64,
     #[arg(long, default_value_t = 16777216)]
     pub max_output_bytes: u64,
+    /// Scanned page: render it and run OCR (executes pdftoppm and tesseract
+    /// from PATH; requires the table-ocr feature).
+    #[arg(long)]
+    pub ocr: bool,
+    /// Tesseract language(s) for --ocr, e.g. eng or deu+eng.
+    #[arg(long, default_value = "eng")]
+    pub ocr_language: String,
+    /// Raster resolution for --ocr.
+    #[arg(long, default_value_t = 300, value_parser = clap::value_parser!(u32).range(72..=1200))]
+    pub ocr_dpi: u32,
 }
 #[derive(Debug, Args)]
 pub struct PdfTableArgs {

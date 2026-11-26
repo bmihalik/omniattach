@@ -14,7 +14,7 @@ pub(super) fn discover(
     options: &Options,
 ) -> Result<Vec<PdfTableGrid>> {
     let mut grids = Vec::new();
-    paths::scan(content, options, false, |paint| {
+    paths::scan(content, options, paths::Clips::Reject, |paint| {
         if paint.irregular || !matches!(paint.operator, "S" | "s") {
             return Ok(());
         }
@@ -27,6 +27,8 @@ pub(super) fn discover(
                 x_boundaries: xs,
                 y_boundaries: ys,
                 cell_spans: Vec::new(),
+                rotation: 0,
+                text_assignment: Default::default(),
             });
         }
         Ok(())

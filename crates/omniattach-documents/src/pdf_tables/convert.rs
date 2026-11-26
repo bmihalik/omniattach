@@ -3,10 +3,10 @@
 //! One algorithm serves plain grids and grids with merged cells: a plain grid
 //! is simply a partition where every cell spans one slot.
 use super::{
-    MAX_TEXT_BYTES, PdfTableConversion, PdfTableGrid, PdfTableSpan, TABLE_SCHEMA, cell_lines,
-    invalid, limit, markdown,
+    MAX_TEXT_BYTES, PdfTableConversion, PdfTableGrid, PdfTableSpan, PdfTextAssignment,
+    TABLE_SCHEMA, cell_lines, frame, invalid, limit, markdown,
 };
-use crate::{Options, PdfElementKind, PdfInspection, Result};
+use crate::{Options, PdfBounds, PdfElementKind, PdfInspection, Result};
 use std::collections::BTreeSet;
 
 /// Positioned text inside one cell (assignment bounds, not original bounds).
@@ -105,6 +105,23 @@ fn crossing(sequence: usize, detail: &str) -> crate::Error {
     ))
 }
 
+/// Lenient placement: the cell containing the run's centre, or outside.
+fn centre(grid: &PdfTableGrid, cells: &Partition, b: PdfBounds) -> Placement {
+    let (xs, ys) = (&grid.x_boundaries, &grid.y_boundaries);
+    let x = (b.left + b.right) / 2.0;
+    let y = (b.bottom + b.top) / 2.0;
+    let column = xs.windows(2).position(|w| x >= w[0] && x < w[1]);
+    let row = ys.windows(2).position(|w| y >= w[0] && y < w[1]);
+    match (column, row) {
+        (Some(column), Some(y)) => Placement::Cell {
+            index: cells.at(cells.rows - 1 - y, column),
+            bottom: b.bottom,
+            top: b.top,
+        },
+        _ => Placement::Outside,
+    }
+}
+
 fn place(
     grid: &PdfTableGrid,
     cells: &Partition,
@@ -173,79 +190,142 @@ fn place(
 /// Convert a grid against an inspection of the same PDF.
 ///
 /// The grid is trusted as a selection; this does not prove a real table
-/// exists. Text with unknown position on the page, or text crossing a cell
-/// boundary, is an error rather than being guessed into a cell.
+/// exists. With [`PdfTextAssignment::Contained`], text with unknown position
+/// on the page, or text crossing a cell boundary, is an error rather than
+/// being guessed into a cell.
 pub fn convert_inspection(
     report: &PdfInspection,
     grid: &PdfTableGrid,
     options: &Options,
 ) -> Result<PdfTableConversion> {
-    let (columns, rows) = grid.dimensions()?;
     if grid.page == 0 || grid.page as usize > report.page_count {
         return Err(invalid("table page out of range"));
-    }
-    if columns * rows > options.limits.cells {
-        return Err(limit("table cells"));
     }
     if report.elements.len() > options.limits.blocks {
         return Err(limit("inspection elements"));
     }
+    let lenient = grid.text_assignment == PdfTextAssignment::Centre;
+    let mut texts = Vec::new();
+    for e in &report.elements {
+        if e.anchor.page != grid.page || e.kind != PdfElementKind::Text {
+            continue;
+        }
+        let Some(bounds) = e.bounds else {
+            if lenient {
+                continue;
+            }
+            return Err(invalid("unpositioned text on selected page"));
+        };
+        texts.push(TextRun {
+            bounds,
+            text: e.text.clone(),
+            gap: e.word_gap_before,
+            sequence: e.sequence,
+        });
+    }
+    convert_runs(
+        &report.source.name,
+        &report.source.sha256,
+        &texts,
+        grid,
+        options,
+    )
+}
+
+/// One positioned text run (page coordinates) for [`convert_runs`].
+pub(super) struct TextRun {
+    pub bounds: PdfBounds,
+    pub text: Option<String>,
+    pub gap: bool,
+    pub sequence: usize,
+}
+
+/// Shared conversion for inspected and OCR text.
+pub(super) fn convert_runs(
+    source_name: &str,
+    source_sha256: &str,
+    texts: &[TextRun],
+    grid: &PdfTableGrid,
+    options: &Options,
+) -> Result<PdfTableConversion> {
+    let (columns, rows) = grid.dimensions()?;
+    if !matches!(grid.rotation, 0 | 90 | 270) {
+        return Err(invalid("table rotation must be 0, 90 or 270"));
+    }
+    if columns * rows > options.limits.cells {
+        return Err(limit("table cells"));
+    }
     let cells = Partition::new(&grid.cell_spans, columns, rows)?;
     let (xs, ys) = (&grid.x_boundaries, &grid.y_boundaries);
     let byte_limit = options.limits.archive_bytes.min(MAX_TEXT_BYTES);
+    let lenient = grid.text_assignment == PdfTextAssignment::Centre;
 
     let mut runs: Vec<Vec<Run>> = vec![Vec::new(); cells.spans.len()];
     let mut sequences = Vec::new();
     let mut seen = BTreeSet::new();
     let (mut bytes, mut adjusted, mut excluded) = (0u64, 0usize, 0usize);
-    for e in &report.elements {
-        if e.anchor.page != grid.page || e.kind != PdfElementKind::Text {
-            continue;
-        }
-        let b = e
-            .bounds
-            .ok_or_else(|| invalid("unpositioned text on selected page"))?;
-        if [b.left, b.bottom, b.right, b.top]
+    for t in texts {
+        let page = t.bounds;
+        if [page.left, page.bottom, page.right, page.top]
             .iter()
             .any(|n| !n.is_finite())
-            || b.left >= b.right
-            || b.bottom >= b.top
+            || page.left > page.right
+            || page.bottom > page.top
+            || (!lenient && (page.left == page.right || page.bottom == page.top))
         {
             return Err(invalid("invalid text geometry"));
         }
+        let [left, bottom, right, top] = frame::to_frame(
+            [page.left, page.bottom, page.right, page.top],
+            grid.rotation,
+        );
+        let b = PdfBounds {
+            left,
+            bottom,
+            right,
+            top,
+            estimated: page.estimated,
+        };
         if b.right <= xs[0] || b.left >= xs[columns] || b.top <= ys[0] || b.bottom >= ys[rows] {
             continue;
         }
-        let text = e
-            .text
-            .as_ref()
-            .ok_or_else(|| invalid("undecodable text in table"))?;
+        let Some(text) = t.text.as_ref() else {
+            if lenient {
+                continue;
+            }
+            return Err(invalid("undecodable text in table"));
+        };
         if text.trim().is_empty() {
             continue;
         }
-        let (index, bottom, top) = match place(grid, &cells, b, e.sequence)? {
+        let placement = if lenient {
+            centre(grid, &cells, b)
+        } else {
+            place(grid, &cells, b, t.sequence)?
+        };
+        let (index, bottom, top) = match placement {
             Placement::Outside => {
                 excluded += 1;
                 continue;
             }
             Placement::Cell { index, bottom, top } => (index, bottom, top),
         };
-        if (bottom, top) != (b.bottom, b.top) {
+        if !lenient && (bottom, top) != (b.bottom, b.top) {
             adjusted += 1;
         }
         bytes = bytes.saturating_add(text.len() as u64);
         if bytes > byte_limit {
             return Err(limit("table text bytes"));
         }
-        if !seen.insert(e.sequence) {
+        if !seen.insert(t.sequence) {
             return Err(invalid("duplicate source sequence in inspection"));
         }
-        sequences.push(e.sequence);
+        sequences.push(t.sequence);
         runs[index].push(Run {
             bounds: [b.left, bottom, b.right, top],
             text: text.clone(),
-            gap: e.word_gap_before,
-            sequence: e.sequence,
+            gap: t.gap,
+            sequence: t.sequence,
         });
     }
     if sequences.is_empty() {
@@ -273,7 +353,13 @@ pub fn convert_inspection(
                 .into(),
         );
     }
-    if adjusted > 0 || excluded > 0 {
+    if lenient {
+        warnings.push(
+            "Boundaries are inferred from layout; each text run is placed by its centre \
+             and runs centred outside the grid are skipped"
+                .into(),
+        );
+    } else if adjusted > 0 || excluded > 0 {
         warnings.push(format!(
             "Vertical tolerance applied: {adjusted} text runs clamped to their cell, \
              {excluded} small incursions from outside ignored"
@@ -281,8 +367,8 @@ pub fn convert_inspection(
     }
     Ok(PdfTableConversion {
         schema_version: TABLE_SCHEMA.into(),
-        source_name: report.source.name.clone(),
-        source_sha256: report.source.sha256.clone(),
+        source_name: source_name.into(),
+        source_sha256: source_sha256.into(),
         grid: grid.clone(),
         source_sequences: sequences,
         first_row_is_header: true,
@@ -344,6 +430,8 @@ mod tests {
             x_boundaries: xs.to_vec(),
             y_boundaries: ys.to_vec(),
             cell_spans: Vec::new(),
+            rotation: 0,
+            text_assignment: Default::default(),
         }
     }
 

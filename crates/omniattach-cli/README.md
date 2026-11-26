@@ -42,10 +42,11 @@ Tables, images and equations are opt-in; ordinary `--goal markdown` output is un
 ```sh
 omniattach pdf-tables report.pdf --page 2 --pretty
 omniattach pdf-table report.pdf --page 2 --candidate 1 --output-format markdown
+omniattach pdf-table scan.pdf --page 1 --candidate 1 --ocr --output-format markdown
 omniattach convert report.pdf --goal custom:pdf-images --output report-images
 ```
 
-`pdf-tables`/`pdf-table` write only to stdout and accept `--max-input-bytes` and `--max-output-bytes`. Equation recognition (`custom:pdf-equations`) needs a `workspace` build, `--external-backends`, `--allow-external` and a worker configured through `OMNIATTACH_PDF_EQUATION_WORKER_CONFIG`. See [PDF elements](../omniattach-documents/docs/PDF-ELEMENTS.md).
+`pdf-tables`/`pdf-table` write only to stdout and accept `--max-input-bytes` and `--max-output-bytes`. They find ruled grids, rule-only (booktabs), open-sided, clipped and rotated tables; a page whose strict detectors decline now succeeds with `layout` candidates (or none) instead of failing. `--ocr` reads scanned pages by running `pdftoppm` and `tesseract` from PATH (`--ocr-language`, default `eng`; `--ocr-dpi`, default 300; Cargo feature `table-ocr`, on by default); missing or failing tools give `TOOL_UNAVAILABLE`/8. Equation recognition (`custom:pdf-equations`) needs a `workspace` build, `--external-backends`, `--allow-external` and a worker configured through `OMNIATTACH_PDF_EQUATION_WORKER_CONFIG`. See [PDF elements](../omniattach-documents/docs/PDF-ELEMENTS.md).
 
 ## External conversion
 

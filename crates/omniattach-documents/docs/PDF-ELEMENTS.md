@@ -3,14 +3,14 @@
 LFE ("lopdf floating elements") adds opt-in extraction of non-prose elements from
 native PDFs. Ordinary text extraction (`extract`, `--goal markdown`) is not
 affected; every feature below is requested explicitly. Nothing runs a model or
-OCR unless you configure it.
+OCR unless you ask for it (`--ocr`, an equation worker).
 
 | Element | Library entry point | CLI | Status |
 |---|---|---|---|
 | Inspection | `inspect_pdf`, `inspect_pdf_bytes` | `pdf-inspect` example | Stable base |
 | Images | `extract_pdf_with_images` | `convert --goal custom:pdf-images` | JPEG, JPEG 2000, 8-bit Gray/RGB rasters |
 | Equations | `pdf_equations::recognize_image_equations` | `convert --goal custom:pdf-equations` | Selected image blocks + external worker |
-| Tables | `pdf_tables::{discover_pdf_tables, convert_pdf_table}` | `pdf-tables`, `pdf-table` | Vector-ruled tables, three detectors |
+| Tables | `pdf_tables::{discover_pdf_tables, convert_pdf_table}`, `pdf_tables::ocr` | `pdf-tables`, `pdf-table` (`--ocr`) | Ruled grids, rule-only/open/rotated layouts, scanned pages via OCR |
 
 All features need the `pdf` Cargo feature (enabled by default in the CLI).
 
@@ -38,6 +38,8 @@ Rotate and UserUnit not applied). Text bounds are estimates from font metrics.
 # Tables: list candidates on a page, then convert one
 omniattach pdf-tables input.pdf --page 2 --pretty
 omniattach pdf-table  input.pdf --page 2 --candidate 1 --output-format markdown
+# Scanned page: render + Tesseract (runs pdftoppm and tesseract from PATH)
+omniattach pdf-table  scan.pdf --page 1 --candidate 1 --ocr --ocr-language eng --output-format markdown
 
 # Images: Markdown with image links plus an images/ folder
 omniattach convert input.pdf --goal custom:pdf-images --output out-images
@@ -68,7 +70,8 @@ way to test text assignment on a new layout before writing a detector for it.
 
 `discover_pdf_tables(path, page, options)` returns `PdfTableDiscovery` with
 one-based, page-local candidates. Candidate numbers are only valid for the same
-input bytes. The detector is chosen from the page's painting style:
+input bytes. Strict detectors run first; they only accept drawn grids they can
+fully prove:
 
 | Detector | Recognizes | Merged cells |
 |---|---|---|
@@ -76,10 +79,47 @@ input bytes. The detector is chosen from the page's painting style:
 | `filled_grid` | Thin filled rectangles (`re f`, ≤ 2 units thick); collinear pieces are merged; consecutive rows with the same columns form one band; a full-width heading row becomes its own candidate | No |
 | `open_rows` | Fallback when `filled_grid` finds nothing: filled rules with no outer vertical borders and full-height interior dividers | Row spans (missing rule inside a column) |
 
-Pages that paint rectangles with a fill operator use the filled detectors;
-others use `stroked_grid`. Rejected for now: XObjects (`Do`), non-rectangular
-clips (stroked mode rejects all clips), mixed stroked and filled rulings,
-non-default page Rotate or UserUnit, curves inside a ruling path.
+They decline pages with XObjects (`Do`), clips they cannot prove harmless, mixed
+stroked and filled rulings or non-default page Rotate/UserUnit. When they decline
+or find nothing, the `layout` detector runs (the reason is kept as a warning):
+
+1. **Rules** (`rules.rs`): every visible axis-aligned rule, whatever the painting
+   style: stroked lines, thin filled rectangles, edges of shaded cells and rows
+   (also multi-cell fill paths), cut to the clip and the MediaBox. White paint and
+   images are ignored; Form XObject content is not read.
+2. **Frames** (`frame.rs`): the page is tried upright and, if at least 20% of its
+   text runs up or down the page, rotated by 90 or 270 degrees. Inspection now
+   gives rotated runs correct bounds and a `text_rotation` angle.
+3. **Tables** (`layout.rs`): horizontal rules with the same extent form a table
+   region; bands between rules that hold prose split it; a one-line caption
+   crossing the columns is dropped. Columns come from interior vertical rules, or
+   else from whitespace shared by the lines. Rows come from the rules; inside a
+   tall band a new row starts at a vertical gap, when the first column starts
+   again, or on every line for dense data. The header band stays one row. Column
+   rules running past the last rule (a table cut by the page edge) close the
+   table where they end. Empty outer columns are merged away. A region needs two
+   rows with text in two columns (one with drawn column rules).
+
+All thresholds are relative to the median text height. Layout candidates carry
+`rotation` (0, 90 or 270; boundaries are in the rotated frame: 90 maps `(x, y)`
+to `(y, -x)`, 270 to `(-y, x)`) and convert with `text_assignment: centre`.
+
+### Scanned pages (OCR)
+
+`pdf_tables::ocr` runs the same layout detector on a scanned page. The crate
+starts no processes; the caller supplies a `PdfTableOcrPage`: the rendered page as
+a `GrayRaster` (PGM/PPM parser included), its DPI and OCR words with pixel boxes.
+Rules are long thin lines darker than both sides (so shading is not a rule);
+`GrayRaster::for_ocr` flattens light shading and erases rules before OCR, which
+keeps Tesseract from dropping shaded rows. Words below confidence 0 are dropped
+and ruling fragments (`| _ [ ]`) are trimmed. `discover_ocr_tables` and
+`convert_ocr_table` mirror the native functions; candidates use detector
+`ocr_layout` and `source_sequences` index the OCR word list.
+
+The CLI `--ocr` flag (feature `table-ocr`, on by default) does the whole round
+trip with `pdftoppm -gray` and `tesseract ... tsv` (`--ocr-language`,
+`--ocr-dpi`, default 300). Native discovery on a page without text warns that the
+OCR path is needed.
 
 ### Conversion
 
@@ -87,7 +127,7 @@ non-default page Rotate or UserUnit, curves inside a ruling path.
 inspects the same bytes and calls `convert_inspection`. You can also call
 `convert_inspection(&report, &grid, &options)` with any `PdfTableGrid`.
 
-Rules for placing a text run in a cell:
+`text_assignment: contained` (default, used for drawn grids):
 
 - Horizontally the run must lie fully inside one column; otherwise the
   conversion fails with "text crosses grid boundary".
@@ -95,14 +135,19 @@ Rules for placing a text run in a cell:
   the row by at most min(1.5 units, 15% of text height) and are clamped. A small
   incursion from outside the table is ignored. Larger overlaps fail.
 - For merged cells a centre exactly on a missing rule belongs to the merged cell.
-- Inside a cell, runs are grouped into lines (subscripts and superscripts stay
-  inline), ordered top-down and left-to-right, and lines are joined with `<br>`.
+
+`text_assignment: centre` (inferred grids): each run goes to the cell holding its
+centre; runs centred outside the grid are skipped. Both modes then:
+
+- Inside a cell, group runs into lines (subscripts and superscripts stay
+  inline), order them top-down and left-to-right, and join lines with `<br>`.
 - Markdown/HTML-sensitive characters are written as entities. The first row is
   always the Markdown header.
 
 The result `PdfTableConversion` (schema `omniattach/pdf-table/0.1`) holds the
-source name and SHA-256, the grid (including `cell_spans` for merged cells), the
-inspection sequences of the placed text runs, the Markdown and warnings.
+source name and SHA-256, the grid (including `cell_spans`, `rotation` and
+`text_assignment` when not default), the sequences of the placed text runs, the
+Markdown and warnings.
 
 ### Adding a detector
 
@@ -110,10 +155,12 @@ inspection sequences of the placed text runs, the Markdown and warnings.
    `pdf()` helper and a raw content string.
 2. Check the text assignment first with the `pdf-table` example and a hand-made
    grid. If that already fails, the problem is in conversion, not discovery.
-3. Add a module next to `stroked.rs` / `filled.rs`. Use `paths::scan` to get
-   transformed painted paths; return `PdfTableGrid` values (with `cell_spans`
-   if needed). Conversion needs no change.
-4. Add a `PdfTableDetector` variant and route to it in `discovery.rs`.
+3. Decide where it belongs. A new drawn-grid style is a strict detector: add a
+   module next to `stroked.rs` / `filled.rs`, use `paths::scan` for transformed
+   painted paths and return `PdfTableGrid` values. Anything inferred from text
+   (new row/column heuristics, other rule sources) extends `layout.rs`, which
+   works on plain rules and boxes and so serves native and OCR pages alike.
+4. Add a `PdfTableDetector` variant if needed and route to it in `discovery.rs`.
 5. Run the real-PDF corpus (see Testing) to check nothing else changed.
 
 ## Images
@@ -176,7 +223,9 @@ untrusted input.
 | `src/pdf_images.rs`, `src/pdf_images/{raster,text}.rs` | Image projection, raster to PNG, text between images |
 | `src/pdf_equations.rs` | Equation substitution over image blocks |
 | `src/pdf_tables.rs` | Table types and Markdown rendering |
-| `src/pdf_tables/{discovery,paths,stroked,filled,open_rows}.rs` | Candidate discovery |
+| `src/pdf_tables/{discovery,paths,stroked,filled,open_rows}.rs` | Strict candidate discovery |
+| `src/pdf_tables/{rules,frame,layout}.rs` | Layout detector: rules, rotated frames, table inference |
+| `src/pdf_tables/ocr.rs` | Scanned pages: raster rules, OCR words, PGM parsing |
 | `src/pdf_tables/{convert,cell_lines}.rs` | Text-to-cell assignment and in-cell line order |
 
 ## Testing
@@ -193,9 +242,12 @@ Opt-in suites (ignored by default) need local data:
 python3 scripts/equations/fixtures.py /tmp/eq && python3 scripts/equations/validate_fixtures.py /tmp/eq
 OMNIATTACH_EQUATION_CORPUS=/tmp/eq cargo test -p omniattach-documents --features pdf --test lfe_equation_corpus -- --ignored
 
-# Private real-PDF table regressions
-OMNIATTACH_FILLED_TABLE_SAMPLE=/path/filled.pdf OMNIATTACH_OPEN_ROWS_SAMPLE=/path/02-healthbig.pdf \
+# Private real-PDF table regressions (TABLE_SAMPLES: folder with 03-...-12-... samples)
+OMNIATTACH_FILLED_TABLE_SAMPLE=/path/01-evibaseprac.pdf OMNIATTACH_OPEN_ROWS_SAMPLE=/path/02-healthbig.pdf \
+OMNIATTACH_TABLE_SAMPLES=/path/samples \
   cargo test -p omniattach-documents --features pdf --test pdf_tables -- --ignored
+# OCR round trip (needs pdftoppm and tesseract)
+OMNIATTACH_TABLE_SAMPLES=/path/samples cargo test -p omniattach-cli --test pdf_table_commands -- --ignored
 ```
 
 For a folder of real PDFs, `scripts/tables/table_corpus.py` runs discovery and
@@ -203,6 +255,8 @@ conversion on every page and writes a report (optionally compared with MinerU).
 
 ## Known gaps
 
-Scanned or image tables, borderless tables, column spans, cross-page table
-continuation, Form XObject content in table discovery, rotated pages, and
-recognition of native-text or vector equations.
+Tables: column spans, merged cells in layout tables (a spanning or perpendicular
+label lands in one row), cross-page continuation, Form XObject content, borderless
+tables without any horizontal rule, skewed scans (no deskewing), forms that are
+ruled like tables (they produce layout candidates), small OCR digits. Equations:
+recognition of native-text or vector formulas.

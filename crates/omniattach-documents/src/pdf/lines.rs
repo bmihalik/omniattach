@@ -36,6 +36,11 @@ impl Matrix {
         self.0[2].hypot(self.0[3])
     }
 }
+/// Baseline angle in degrees (counter-clockwise), when at least 0.5 degrees.
+fn text_angle(device: Matrix) -> Option<f64> {
+    let angle = device.0[1].atan2(device.0[0]).to_degrees();
+    (angle.is_finite() && angle.abs() >= 0.5).then_some(angle)
+}
 fn number(o: &Object) -> Option<f64> {
     let n = match o {
         Object::Integer(n) => *n as f64,
@@ -284,7 +289,7 @@ impl Reader {
         let Some(font) = &state.font else {
             self.undecoded += 1;
             if let Some(c) = &mut self.collector {
-                c.text(self.operation, active, None, None, self.pending_space)?;
+                c.text(self.operation, active, None, None, self.pending_space, None)?;
             }
             return Ok(());
         };
@@ -296,10 +301,30 @@ impl Reader {
         let (x, y) = device.origin();
         let height = (state.size * device.y_scale()).abs();
         *tm = Matrix::translate(font.advance(bytes, state), 0.).then(*tm);
-        let end = tm.then(state.ctm).origin().0;
-        if ![x, y, height, end].iter().all(|n| n.is_finite()) {
+        let (end, end_y) = Matrix::translate(0., state.rise)
+            .then(*tm)
+            .then(state.ctm)
+            .origin();
+        if ![x, y, height, end, end_y].iter().all(|n| n.is_finite()) {
             return Err(Error::Parse("non-finite PDF text geometry".into()));
         }
+        // Rotated runs: enclose the transformed baseline-to-cap quad.
+        let rotation = text_angle(device);
+        let area = |estimated| match rotation {
+            None => bounds([[x, y], [end, y + height.max(1.)]], estimated),
+            Some(_) => {
+                let up = [device.0[2] * state.size, device.0[3] * state.size];
+                bounds(
+                    [
+                        [x, y],
+                        [end, end_y],
+                        [x + up[0], y + up[1]],
+                        [end + up[0], end_y + up[1]],
+                    ],
+                    estimated,
+                )
+            }
+        };
         if font.cid && !bytes.len().is_multiple_of(2) {
             self.undecoded += 1;
         }
@@ -314,8 +339,9 @@ impl Reader {
                         self.operation,
                         active,
                         Some(&text),
-                        bounds([[x, y], [end, y + height.max(1.)]], true)?,
+                        area(true)?,
                         self.pending_space,
+                        rotation,
                     )?;
                 } else {
                     self.runs.push(Run {
@@ -336,8 +362,9 @@ impl Reader {
                     self.operation,
                     active,
                     None,
-                    bounds([[x, y], [end, y + height.max(1.)]], true)?,
+                    area(true)?,
                     self.pending_space,
+                    rotation,
                 )?;
             }
         }

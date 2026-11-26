@@ -37,16 +37,7 @@ impl PdfPageOcr {
         page: u32,
         ctx: &BackendContext<'_>,
     ) -> Result<Vec<TextUnit>> {
-        if !(72..=1200).contains(&self.dpi) {
-            return Err(Error::Configuration(
-                "PDF OCR DPI must be in 72..=1200".into(),
-            ));
-        }
-        if self.language.trim().is_empty() {
-            return Err(Error::Configuration(
-                "PDF OCR language must be nonempty".into(),
-            ));
-        }
+        self.validate()?;
         let scratch = tempfile::tempdir()?;
         let prefix = scratch.path().join("page");
         let render = self
@@ -82,6 +73,75 @@ impl PdfPageOcr {
             word.location.page = Some(page);
         }
         Ok(words)
+    }
+
+    /// Renders one PDF page (one-based) as a binary 8-bit grayscale PGM.
+    pub fn render_page_gray(
+        &self,
+        source: &Path,
+        page: u32,
+        ctx: &BackendContext<'_>,
+    ) -> Result<Vec<u8>> {
+        self.validate()?;
+        let scratch = tempfile::tempdir()?;
+        let prefix = scratch.path().join("page");
+        let render = self
+            .rasterizer
+            .command(scratch.path())
+            .args([
+                "-r",
+                &self.dpi.to_string(),
+                "-f",
+                &page.to_string(),
+                "-l",
+                &page.to_string(),
+                "-singlefile",
+                "-gray",
+            ])
+            .arg(source.as_os_str())
+            .arg(prefix.as_os_str());
+        ctx.runner.run(&render, &ctx.run_options)?;
+        let image = scratch.path().join("page.pgm");
+        if !image.is_file() {
+            return Err(Error::InvalidOutput(
+                "pdftoppm produced no page image".into(),
+            ));
+        }
+        Ok(std::fs::read(&image)?)
+    }
+
+    /// OCRs an in-memory image (any format Tesseract reads, e.g. PGM) and
+    /// returns word-level units with boxes in that image's pixels.
+    pub fn recognize_image_words(
+        &self,
+        image: &[u8],
+        ctx: &BackendContext<'_>,
+    ) -> Result<Vec<TextUnit>> {
+        self.validate()?;
+        let scratch = tempfile::tempdir()?;
+        let path = scratch.path().join("image.pgm");
+        std::fs::write(&path, image)?;
+        let ocr = self
+            .tesseract
+            .command(scratch.path())
+            .arg(path.as_os_str())
+            .args(["stdout", "-l", &self.language, "tsv"]);
+        let output = ctx.runner.run(&ocr, &ctx.run_options)?;
+        parse_tesseract_tsv(output.stdout_text()?)
+    }
+
+    fn validate(&self) -> Result<()> {
+        if !(72..=1200).contains(&self.dpi) {
+            return Err(Error::Configuration(
+                "PDF OCR DPI must be in 72..=1200".into(),
+            ));
+        }
+        if self.language.trim().is_empty() {
+            return Err(Error::Configuration(
+                "PDF OCR language must be nonempty".into(),
+            ));
+        }
+        Ok(())
     }
 
     /// Renders one PDF page (one-based) and returns recognized plain text joined from TSV words. Empty text means no words were found.
@@ -134,6 +194,7 @@ mod tests {
             let stdout = match program.as_str() {
                 "pdftoppm" => {
                     std::fs::write(spec.cwd.join("page.png"), b"png")?;
+                    std::fs::write(spec.cwd.join("page.pgm"), b"P5 1 1 255 \xff")?;
                     Vec::new()
                 }
                 "tesseract" => SAMPLE_TSV.as_bytes().to_vec(),
@@ -174,6 +235,24 @@ mod tests {
         assert!(calls[1].contains(&"stdout".to_string()));
         assert!(calls[1].contains(&"tsv".to_string()));
         assert!(calls[1].windows(2).any(|w| w == ["-l", "hun+eng"]));
+    }
+
+    #[test]
+    fn renders_gray_page_and_recognizes_image_bytes() {
+        let runner = FakeRunner {
+            calls: std::sync::Mutex::new(Vec::new()),
+        };
+        let ctx = BackendContext::new(&runner);
+        let ocr = PdfPageOcr::default();
+        let pgm = ocr
+            .render_page_gray(&PathBuf::from("scan.pdf"), 2, &ctx)
+            .unwrap();
+        assert!(pgm.starts_with(b"P5"));
+        let words = ocr.recognize_image_words(&pgm, &ctx).unwrap();
+        assert_eq!(words.len(), 2);
+        let calls = runner.calls.lock().unwrap();
+        assert!(calls[0].contains(&"-gray".to_string()));
+        assert!(calls[1][1].ends_with("image.pgm"));
     }
 
     #[test]

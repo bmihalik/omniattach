@@ -1,8 +1,9 @@
 //! Minimal page-content path interpreter shared by the table detectors.
 //!
 //! Tracks `q`/`Q`/`cm`, builds transformed path segments from `m`/`l`/`h`/`re`,
-//! and hands each painted path to a detector. Clipping paths are either
-//! rejected or, when allowed, reduced to an axis-aligned rectangle.
+//! and hands each painted path to a detector. Clipping paths are rejected,
+//! reduced to an axis-aligned rectangle, or (lenient mode) ignored together
+//! with XObject invocations.
 use super::{invalid, limit};
 use crate::{Options, Result};
 use lopdf::{Object, content::Content};
@@ -26,17 +27,44 @@ pub(super) struct Paint<'a> {
     pub rects: &'a [Rect],
     /// Curves, `l` without a current point, or a non-rectangular `re`.
     pub irregular: bool,
-    /// Effective rectangular clip at paint time.
+    /// Effective rectangular clip at paint time (a bounding box of the clip
+    /// path with [`Clips::Ignore`]).
     pub clip: Option<Rect>,
+    /// Current stroke / fill colour is white (invisible on paper).
+    pub white_stroke: bool,
+    pub white_fill: bool,
 }
 
-/// Run `on_paint` for every painted path. With `allow_clips`, simple
-/// rectangular `W n` clips are tracked and all clips are returned; otherwise
-/// any clipping operator is an error. XObjects are always rejected.
+/// How [`scan`] treats clipping paths and XObjects.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum Clips {
+    /// Any clip or XObject is an error.
+    Reject,
+    /// Simple rectangular `W n` clips are tracked; XObjects are errors.
+    Rectangles,
+    /// Never an error: clips are approximated by bounding boxes and
+    /// XObjects are skipped.
+    Ignore,
+}
+
+/// Whether a colour operator's operands describe white.
+fn white(operator: &str, operands: &[Object]) -> Option<bool> {
+    let values: Vec<f64> = operands.iter().filter_map(|o| number(o).ok()).collect();
+    let all = |v: f64| values.iter().all(|n| (n - v).abs() < 0.01);
+    match (operator, values.len()) {
+        ("cs" | "CS", _) => Some(false),
+        (_, 1 | 3) => Some(all(1.0)),
+        (_, 4) => Some(all(0.0)),
+        _ => None,
+    }
+}
+
+/// Run `on_paint` for every painted path and return the rectangular clips
+/// seen (always empty with [`Clips::Ignore`]).
 pub(super) fn scan(
     content: &Content,
     options: &Options,
-    allow_clips: bool,
+    clips_mode: Clips,
     mut on_paint: impl FnMut(Paint<'_>) -> Result<()>,
 ) -> Result<Vec<Rect>> {
     if content.operations.len() > options.limits.xml_nodes as usize {
@@ -44,7 +72,8 @@ pub(super) fn scan(
     }
     let mut matrix = IDENTITY;
     let mut clip: Option<Rect> = None;
-    let mut stack: Vec<(Matrix, Option<Rect>)> = Vec::new();
+    let (mut white_stroke, mut white_fill) = (false, false);
+    let mut stack: Vec<(Matrix, Option<Rect>, bool, bool)> = Vec::new();
     let mut clips = Vec::new();
     let mut segments: Vec<Segment> = Vec::new();
     let mut rects: Vec<Rect> = Vec::new();
@@ -64,9 +93,22 @@ pub(super) fn scan(
                 if stack.len() >= MAX_STACK {
                     return Err(limit("graphics stack"));
                 }
-                stack.push((matrix, clip));
+                stack.push((matrix, clip, white_stroke, white_fill));
             }
-            "Q" => (matrix, clip) = stack.pop().ok_or_else(|| invalid("unbalanced Q"))?,
+            "Q" => {
+                (matrix, clip, white_stroke, white_fill) =
+                    stack.pop().ok_or_else(|| invalid("unbalanced Q"))?
+            }
+            "g" | "rg" | "k" | "sc" | "scn" | "cs" => {
+                if let Some(w) = white(op.operator.as_str(), a) {
+                    white_fill = w;
+                }
+            }
+            "G" | "RG" | "K" | "SC" | "SCN" | "CS" => {
+                if let Some(w) = white(&op.operator.to_ascii_lowercase(), a) {
+                    white_stroke = w;
+                }
+            }
             "cm" => {
                 if a.len() != 6 {
                     return Err(invalid("invalid cm"));
@@ -77,6 +119,7 @@ pub(super) fn scan(
                     return Err(invalid("matrix overflow"));
                 }
             }
+            "Do" if clips_mode == Clips::Ignore => {}
             "Do" => {
                 return Err(invalid(
                     "selected page invokes XObjects; Forms and images unsupported",
@@ -121,8 +164,9 @@ pub(super) fn scan(
                 start = current;
             }
             "c" | "v" | "y" => curved = true,
+            "W" | "W*" if clips_mode == Clips::Ignore => pending_clip = true,
             "W" | "W*" => {
-                if !allow_clips {
+                if clips_mode == Clips::Reject {
                     return Err(invalid("clipped page content unsupported"));
                 }
                 if curved || bad_rect || pending_clip {
@@ -147,7 +191,31 @@ pub(super) fn scan(
                 {
                     return Err(invalid("path overflow"));
                 }
-                if pending_clip {
+                if pending_clip && clips_mode == Clips::Ignore {
+                    if operator != "n" {
+                        on_paint(Paint {
+                            operator,
+                            segments: &segments,
+                            rects: &rects,
+                            irregular: curved || bad_rect,
+                            clip,
+                            white_stroke,
+                            white_fill,
+                        })?;
+                    }
+                    // Any clip shape is approximated by its bounding box.
+                    if let Some(b) = extent(&segments) {
+                        clip = Some(match clip {
+                            Some(old) => [
+                                b[0].max(old[0]),
+                                b[1].max(old[1]),
+                                b[2].min(old[2]),
+                                b[3].min(old[3]),
+                            ],
+                            None => b,
+                        });
+                    }
+                } else if pending_clip {
                     if operator != "n" {
                         return Err(invalid("painted clipping path unsupported"));
                     }
@@ -174,6 +242,8 @@ pub(super) fn scan(
                         rects: &rects,
                         irregular: curved || bad_rect,
                         clip,
+                        white_stroke,
+                        white_fill,
                     })?;
                 }
                 segments.clear();
@@ -223,6 +293,26 @@ fn compose(a: Matrix, b: Matrix) -> Matrix {
     ]
 }
 
+/// Bounding box of a path, or `None` when empty.
+fn extent(segments: &[Segment]) -> Option<Rect> {
+    let points = segments.iter().flat_map(|(a, b)| [a, b]);
+    let mut r = [
+        f64::INFINITY,
+        f64::INFINITY,
+        f64::NEG_INFINITY,
+        f64::NEG_INFINITY,
+    ];
+    for p in points {
+        r = [
+            r[0].min(p[0]),
+            r[1].min(p[1]),
+            r[2].max(p[0]),
+            r[3].max(p[1]),
+        ];
+    }
+    r.iter().all(|n| n.is_finite()).then_some(r)
+}
+
 /// A closed four-edge axis-aligned rectangle, or `None`.
 fn rectangle(edges: &[Segment]) -> Option<Rect> {
     if edges.len() != 4 {
@@ -259,12 +349,12 @@ pub(super) fn inside(a: Rect, b: Rect) -> bool {
 mod tests {
     use super::*;
 
-    fn paints(data: &[u8], allow_clips: bool) -> Result<Vec<(String, usize)>> {
+    fn paints(data: &[u8], clips: Clips) -> Result<Vec<(String, usize)>> {
         let mut out = Vec::new();
         scan(
             &Content::decode(data).unwrap(),
             &Options::default(),
-            allow_clips,
+            clips,
             |p| {
                 out.push((p.operator.to_string(), p.segments.len()));
                 Ok(())
@@ -277,7 +367,7 @@ mod tests {
     fn applies_transforms_and_restores_state() {
         let content = Content::decode(b"q 2 0 0 2 5 7 cm 0 0 m 10 0 l S Q 0 0 m 10 0 l S").unwrap();
         let mut seen = Vec::new();
-        scan(&content, &Options::default(), false, |p| {
+        scan(&content, &Options::default(), Clips::Reject, |p| {
             seen.push(p.segments[0]);
             Ok(())
         })
@@ -287,23 +377,37 @@ mod tests {
 
     #[test]
     fn rejects_xobjects_clips_and_unbalanced_state() {
-        assert!(paints(b"/F Do", true).is_err());
-        assert!(paints(b"0 0 10 10 re W n", false).is_err());
-        assert!(paints(b"q", false).is_err());
-        assert!(paints(b"0 0 m 5 5 l 0 5 l h W n", true).is_err());
+        assert!(paints(b"/F Do", Clips::Rectangles).is_err());
+        assert!(paints(b"0 0 10 10 re W n", Clips::Reject).is_err());
+        assert!(paints(b"q", Clips::Reject).is_err());
+        assert!(paints(b"0 0 m 5 5 l 0 5 l h W n", Clips::Rectangles).is_err());
     }
 
     #[test]
     fn rectangular_clips_are_tracked_not_painted() {
         let content = Content::decode(b"0 0 100 100 re W n 10 10 20 20 re f").unwrap();
         let mut clip = None;
-        let clips = scan(&content, &Options::default(), true, |p| {
+        let clips = scan(&content, &Options::default(), Clips::Rectangles, |p| {
             clip = p.clip;
             Ok(())
         })
         .unwrap();
         assert_eq!(clips, vec![[0., 0., 100., 100.]]);
         assert_eq!(clip, Some([0., 0., 100., 100.]));
+    }
+
+    #[test]
+    fn lenient_mode_skips_clips_and_xobjects_and_tracks_white() {
+        let content =
+            Content::decode(b"/Im1 Do 0 0 m 5 5 l 0 5 l h W n 1 g 0 0 5 5 re f 0 g 0 0 5 5 re f")
+                .unwrap();
+        let mut seen = Vec::new();
+        scan(&content, &Options::default(), Clips::Ignore, |p| {
+            seen.push(p.white_fill);
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(seen, vec![true, false]);
     }
 
     #[test]
@@ -314,7 +418,7 @@ mod tests {
             scan(
                 &Content::decode(b"0 0 m").unwrap(),
                 &options,
-                false,
+                Clips::Reject,
                 |_| Ok(())
             )
             .is_err()

@@ -4,10 +4,14 @@
 //! environment variable, so private samples never enter the repository:
 //!
 //! ```sh
-//! OMNIATTACH_FILLED_TABLE_SAMPLE=/path/sample.pdf \
+//! OMNIATTACH_FILLED_TABLE_SAMPLE=/path/01-evibaseprac.pdf \
 //! OMNIATTACH_OPEN_ROWS_SAMPLE=/path/02-healthbig.pdf \
+//! OMNIATTACH_TABLE_SAMPLES=/path/to/sample-dir \
 //!   cargo test -p omniattach-documents --features pdf --test pdf_tables -- --ignored
 //! ```
+//!
+//! `OMNIATTACH_TABLE_SAMPLES` is a directory holding the layout samples
+//! (`03-ecgacqu.pdf` ... `12-tarot.pdf`) under their original names.
 #![cfg(feature = "pdf")]
 use lopdf::{Object, Stream, dictionary};
 use omniattach_documents::pdf_tables::{
@@ -22,7 +26,8 @@ const TEXT: &str = "BT /F1 10 Tf 1 0 0 1 60 140 Tm (Name) Tj 1 0 0 1 160 140 Tm 
                     1 0 0 1 60 110 Tm (Alpha) Tj 1 0 0 1 160 110 Tm (42) Tj ET\n";
 const EXPECTED: &str = "| Name | Value |\n| --- | --- |\n| Alpha | 42 |\n";
 
-/// One-page PDF with Helvetica as /F1 and optional extra page entries.
+/// One-page PDF with Helvetica as /F1, a 1x1 image as /Im1 and optional
+/// extra page entries.
 fn pdf(content: &str, page_extra: &[(&str, Object)]) -> Vec<u8> {
     let mut doc = lopdf::Document::with_version("1.4");
     let pages = doc.new_object_id();
@@ -30,9 +35,19 @@ fn pdf(content: &str, page_extra: &[(&str, Object)]) -> Vec<u8> {
         "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Helvetica", "Encoding" => "WinAnsiEncoding",
     });
     let stream = doc.add_object(Stream::new(dictionary! {}, content.as_bytes().to_vec()));
+    let image = doc.add_object(Stream::new(
+        dictionary! {
+            "Type" => "XObject", "Subtype" => "Image", "Width" => 1, "Height" => 1,
+            "ColorSpace" => "DeviceGray", "BitsPerComponent" => 8,
+        },
+        vec![128],
+    ));
     let mut page = dictionary! {
         "Type" => "Page", "Parent" => pages, "Contents" => stream,
-        "Resources" => dictionary! {"Font" => dictionary! {"F1" => font}},
+        "Resources" => dictionary! {
+            "Font" => dictionary! {"F1" => font},
+            "XObject" => dictionary! {"Im1" => image},
+        },
         "MediaBox" => vec![0.into(), 0.into(), 600.into(), 800.into()],
     };
     for (key, value) in page_extra {
@@ -70,6 +85,25 @@ fn rejected(result: omniattach_documents::Result<impl std::fmt::Debug>, needle: 
         ),
         Ok(v) => panic!("expected an error mentioning {needle:?}, got {v:?}"),
     }
+}
+
+/// The strict detectors declined with `needle`; only layout candidates remain.
+fn strict_declined(bytes: &[u8], needle: &str) {
+    let found = discover_pdf_tables_bytes("x", bytes, 1, &Options::default()).unwrap();
+    assert!(
+        found
+            .warnings
+            .iter()
+            .any(|w| w.contains("declined") && w.contains(needle)),
+        "{:?}",
+        found.warnings
+    );
+    assert!(
+        found
+            .candidates
+            .iter()
+            .all(|c| c.detector == PdfTableDetector::Layout)
+    );
 }
 
 /// Parse generated Markdown rows back into plain cell text.
@@ -144,6 +178,8 @@ mod stroked {
             x_boundaries: vec![50., 150., 250.],
             y_boundaries: vec![100., 130., 160.],
             cell_spans: Vec::new(),
+            rotation: 0,
+            text_assignment: Default::default(),
         };
         assert_eq!(
             convert_inspection(&report, &manual, &options)
@@ -201,19 +237,18 @@ mod stroked {
     }
 
     #[test]
-    fn clipping_rotation_and_userunit_are_unsupported() {
-        rejected(
-            discover(&pdf(&format!("0 0 600 600 re W n\n{GRID}{TEXT}"), &[])),
-            "clipped",
-        );
-        rejected(
-            discover(&pdf(&format!("{GRID}{TEXT}"), &[("Rotate", 90.into())])),
-            "rotation",
-        );
-        rejected(
-            discover(&pdf(&format!("{GRID}{TEXT}"), &[("UserUnit", 2.into())])),
-            "UserUnit",
-        );
+    fn clipping_rotation_and_userunit_fall_back_to_layout() {
+        for bytes in [
+            pdf(&format!("0 0 600 600 re W n\n{GRID}{TEXT}"), &[]),
+            pdf(&format!("{GRID}{TEXT}"), &[("Rotate", 90.into())]),
+            pdf(&format!("{GRID}{TEXT}"), &[("UserUnit", 2.into())]),
+        ] {
+            let found = discover_pdf_tables_bytes("x", &bytes, 1, &Options::default()).unwrap();
+            assert!(found.warnings.iter().any(|w| w.contains("declined")));
+            assert_eq!(found.candidates.len(), 1);
+            assert_eq!(found.candidates[0].detector, PdfTableDetector::Layout);
+            assert_eq!(markdown(&bytes, 1).unwrap(), EXPECTED);
+        }
     }
 
     #[test]
@@ -265,14 +300,9 @@ mod filled {
     }
 
     #[test]
-    fn clip_cutting_the_table_is_rejected() {
-        rejected(
-            discover(&pdf(
-                &content().replace("0 0 600 600", "100 0 500 600"),
-                &[],
-            )),
-            "clipped",
-        );
+    fn clip_cutting_the_table_declines_the_strict_detector() {
+        let bytes = pdf(&content().replace("0 0 600 600", "100 0 500 600"), &[]);
+        strict_declined(&bytes, "clipped");
     }
 }
 
@@ -339,23 +369,98 @@ mod open_rows {
     }
 
     #[test]
-    fn partial_divider_does_not_invent_columns() {
+    fn partial_divider_does_not_invent_strict_columns() {
         let bytes = pdf(
             &content().replace("230 100 0.5 120.5", "230 100 0.5 60"),
             &[],
         );
-        assert!(discover(&bytes).unwrap().is_empty());
+        let found = discover_pdf_tables_bytes("x", &bytes, 1, &Options::default()).unwrap();
+        assert!(
+            found
+                .candidates
+                .iter()
+                .all(|c| c.detector == PdfTableDetector::Layout)
+        );
     }
 
     #[test]
-    fn clip_cutting_the_table_is_rejected() {
-        rejected(
-            discover(&pdf(
-                &content().replace("0 0 600 600", "100 0 500 600"),
-                &[],
-            )),
-            "clipped",
+    fn clip_cutting_the_table_declines_the_strict_detector() {
+        let bytes = pdf(&content().replace("0 0 600 600", "100 0 500 600"), &[]);
+        strict_declined(&bytes, "clipped");
+    }
+}
+
+mod layout {
+    use super::*;
+
+    /// Three rules, no column rules, an image on the page.
+    const BOOKTABS: &str = "50 300 m 350 300 l S 50 280 m 350 280 l S 50 220 m 350 220 l S\n\
+        q 10 0 0 10 400 400 cm /Im1 Do Q\n\
+        BT /F1 10 Tf 1 0 0 1 55 285 Tm (Lead) Tj 1 0 0 1 150 285 Tm (Se) Tj 1 0 0 1 250 285 Tm (P+) Tj \
+        1 0 0 1 55 265 Tm (P236) Tj 1 0 0 1 150 265 Tm (96.29) Tj 1 0 0 1 250 265 Tm (100) Tj \
+        1 0 0 1 55 250 Tm (P237) Tj 1 0 0 1 150 250 Tm (100) Tj 1 0 0 1 250 250 Tm (85.71) Tj \
+        1 0 0 1 55 235 Tm (P238) Tj 1 0 0 1 150 235 Tm (98.5) Tj 1 0 0 1 250 235 Tm (99) Tj ET\n";
+    const BOOKTABS_MD: &str = "| Lead | Se | P+ |\n| --- | --- | --- |\n| P236 | 96.29 | 100 |\n\
+        | P237 | 100 | 85.71 |\n| P238 | 98.5 | 99 |\n";
+
+    fn only_layout(bytes: &[u8]) -> omniattach_documents::pdf_tables::PdfTableCandidate {
+        let found = discover_pdf_tables_bytes("x", bytes, 1, &Options::default()).unwrap();
+        assert_eq!(found.candidates.len(), 1, "{found:?}");
+        assert_eq!(found.candidates[0].detector, PdfTableDetector::Layout);
+        found.candidates[0].clone()
+    }
+
+    #[test]
+    fn rule_only_table_on_a_page_with_images() {
+        let bytes = pdf(BOOKTABS, &[]);
+        only_layout(&bytes);
+        let result = convert_pdf_table_bytes("x", &bytes, 1, 1, &Options::default()).unwrap();
+        assert_eq!(result.markdown, BOOKTABS_MD);
+        assert_eq!(
+            result.grid.text_assignment,
+            omniattach_documents::pdf_tables::PdfTextAssignment::Centre
         );
+    }
+
+    #[test]
+    fn table_rotated_on_the_page_is_read_upright() {
+        for (matrix, rotation) in [("0 1 -1 0 600 0", 90), ("0 -1 1 0 0 600", 270)] {
+            let bytes = pdf(&format!("q {matrix} cm\n{BOOKTABS}Q\n"), &[]);
+            assert_eq!(only_layout(&bytes).rotation, rotation);
+            assert_eq!(markdown(&bytes, 1).unwrap(), BOOKTABS_MD);
+        }
+    }
+
+    #[test]
+    fn mixed_stroked_and_filled_rulings() {
+        let content = format!(
+            "{}50 160 200 0.5 re f\n{TEXT}",
+            GRID.replace("50 160 m 250 160 l ", "")
+        );
+        let bytes = pdf(&content, &[]);
+        strict_declined(&bytes, "mixed");
+        assert_eq!(markdown(&bytes, 1).unwrap(), EXPECTED);
+    }
+
+    #[test]
+    fn table_cut_by_the_page_edge_keeps_its_open_rows() {
+        // Header rules only; the column rules run on to the page bottom.
+        let content = "50 160 m 250 160 l S 50 130 m 250 130 l S 50 160 m 50 0 l S \
+            150 160 m 150 0 l S 250 160 m 250 0 l S\n\
+            BT /F1 10 Tf 1 0 0 1 60 140 Tm (Name) Tj 1 0 0 1 160 140 Tm (Value) Tj \
+            1 0 0 1 60 110 Tm (Alpha) Tj 1 0 0 1 160 110 Tm (42) Tj \
+            1 0 0 1 60 10 Tm (Omega) Tj 1 0 0 1 160 10 Tm (7) Tj ET\n";
+        let rows = rows(&markdown(&pdf(content, &[]), 1).unwrap());
+        assert_eq!(rows.first().unwrap(), &["Name", "Value"]);
+        assert_eq!(rows.last().unwrap(), &["Omega", "7"]);
+    }
+
+    #[test]
+    fn scanned_page_hints_at_ocr() {
+        let bytes = pdf("q 600 0 0 800 0 0 cm /Im1 Do Q\n", &[]);
+        let found = discover_pdf_tables_bytes("x", &bytes, 1, &Options::default()).unwrap();
+        assert!(found.candidates.is_empty());
+        assert!(found.warnings.iter().any(|w| w.contains("OCR")));
     }
 }
 
@@ -521,5 +626,142 @@ mod samples {
         }
         assert_eq!(names.len(), 32);
         assert_eq!(names.iter().collect::<BTreeSet<_>>().len(), 32);
+    }
+
+    /// One expected layout candidate on a sample page.
+    struct Expected {
+        file: &'static str,
+        page: u32,
+        candidates: usize,
+        /// One-based candidate checked below.
+        candidate: usize,
+        header: &'static [&'static str],
+        columns: usize,
+        rows: usize,
+        rotation: u16,
+    }
+
+    const LAYOUT: [Expected; 7] = [
+        Expected {
+            file: "03-ecgacqu.pdf",
+            page: 2,
+            candidates: 1,
+            candidate: 1,
+            header: &[
+                "Patient ﬁle ID and record no. in Physionet",
+                "Lead I",
+                "Lead III",
+            ],
+            columns: 6,
+            rows: 12,
+            rotation: 0,
+        },
+        Expected {
+            file: "04-ecgacqu.pdf",
+            page: 2,
+            candidates: 2,
+            candidate: 2,
+            header: &["Patient ID and lead number from Physionet", "Se", "P+"],
+            columns: 3,
+            rows: 9,
+            rotation: 0,
+        },
+        Expected {
+            file: "06-cyberbullying.pdf",
+            page: 7,
+            candidates: 1,
+            candidate: 1,
+            header: &["Study", "Sample", "Time frame/Type of assessment"],
+            columns: 5,
+            rows: 3,
+            rotation: 90,
+        },
+        Expected {
+            file: "07-redcyberbull.pdf",
+            page: 2,
+            candidates: 1,
+            candidate: 1,
+            header: &["Semester", "Month", "Target group", "Activity"],
+            columns: 4,
+            rows: 11,
+            rotation: 0,
+        },
+        Expected {
+            file: "08-redcyberbullschools.pdf",
+            page: 2,
+            candidates: 1,
+            candidate: 1,
+            header: &["Name", "Aim", "Content", "Strategy"],
+            columns: 5,
+            rows: 5,
+            rotation: 0,
+        },
+        Expected {
+            file: "09-funbiochemi.pdf",
+            page: 1,
+            candidates: 1,
+            candidate: 1,
+            header: &["Type", "Enzyme Deﬁciency", "Tissue", "Common Name"],
+            columns: 5,
+            rows: 11,
+            rotation: 0,
+        },
+        Expected {
+            file: "10-neurofeedback.pdf",
+            page: 1,
+            candidates: 1,
+            candidate: 1,
+            header: &["Symptome", "Schweregrad (1 10)"],
+            columns: 2,
+            rows: 39,
+            rotation: 0,
+        },
+    ];
+
+    #[test]
+    #[ignore = "needs OMNIATTACH_TABLE_SAMPLES (directory of layout samples)"]
+    fn layout_samples_booktabs_rotated_mixed_and_shaded() {
+        let dir = std::path::PathBuf::from(
+            std::env::var("OMNIATTACH_TABLE_SAMPLES").expect("set OMNIATTACH_TABLE_SAMPLES"),
+        );
+        for Expected {
+            file,
+            page,
+            candidates: count,
+            candidate,
+            header,
+            columns,
+            rows: rows_expected,
+            rotation,
+        } in LAYOUT
+        {
+            let bytes = std::fs::read(dir.join(file)).unwrap();
+            let found = discover_pdf_tables_bytes(file, &bytes, page, &Options::default()).unwrap();
+            assert_eq!(found.candidates.len(), count, "{file} p{page}");
+            let c = &found.candidates[candidate - 1];
+            assert_eq!(c.detector, PdfTableDetector::Layout, "{file}");
+            assert_eq!(c.rotation, rotation, "{file}");
+            assert_eq!(c.x_boundaries.len() - 1, columns, "{file}");
+            assert_eq!(c.y_boundaries.len() - 1, rows_expected, "{file}");
+            let result =
+                convert_pdf_table_bytes(file, &bytes, page, candidate, &Options::default())
+                    .unwrap();
+            let table = rows(&result.markdown);
+            assert_eq!(&table[0][..header.len()], header, "{file}");
+        }
+        // Every rotated page of the chapter's Table 5.1 is found.
+        let bytes = std::fs::read(dir.join("06-cyberbullying.pdf")).unwrap();
+        for page in 6..=18 {
+            let found = discover_pdf_tables_bytes("06", &bytes, page, &Options::default()).unwrap();
+            assert_eq!(found.candidates.len(), 1, "page {page}");
+            assert_eq!(found.candidates[0].rotation, 90, "page {page}");
+        }
+        // Scanned pages yield nothing natively and point at the OCR path.
+        for file in ["05-bluetoothlow.pdf", "11-starcraft.pdf", "12-tarot.pdf"] {
+            let bytes = std::fs::read(dir.join(file)).unwrap();
+            let found = discover_pdf_tables_bytes(file, &bytes, 1, &Options::default()).unwrap();
+            assert!(found.candidates.is_empty(), "{file}");
+            assert!(found.warnings.iter().any(|w| w.contains("OCR")), "{file}");
+        }
     }
 }

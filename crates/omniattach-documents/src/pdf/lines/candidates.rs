@@ -35,6 +35,10 @@ pub struct PdfElement {
     pub bounds: Option<PdfBounds>,
     pub text: Option<String>,
     pub word_gap_before: bool,
+    /// Baseline angle in degrees counter-clockwise, only for visibly rotated
+    /// text (at least 0.5 degrees). Bounds then enclose the rotated run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text_rotation: Option<f64>,
     pub pixel_size: Option<[u32; 2]>,
     pub derived_from: Vec<usize>,
     pub evidence: Vec<String>,
@@ -92,6 +96,7 @@ impl Collector {
             bounds: None,
             text: None,
             word_gap_before: false,
+            text_rotation: None,
             pixel_size: None,
             derived_from: Vec::new(),
             evidence: Vec::new(),
@@ -113,9 +118,11 @@ impl Collector {
         text: Option<&str>,
         area: Option<PdfBounds>,
         gap: bool,
+        rotation: Option<f64>,
     ) -> Result<()> {
         let mut element = self.element(PdfElementKind::Text, operation, forms);
         element.bounds = area;
+        element.text_rotation = rotation;
         element.text = text.map(str::to_owned);
         element.word_gap_before = gap;
         element.evidence.push(

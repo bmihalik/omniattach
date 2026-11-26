@@ -43,7 +43,7 @@ pub(super) fn discover(
     options: &Options,
 ) -> Result<(Vec<PdfTableGrid>, bool)> {
     let mut lines = Vec::new();
-    let clips = paths::scan(content, options, true, |paint| {
+    let clips = paths::scan(content, options, paths::Clips::Rectangles, |paint| {
         if !matches!(paint.operator, "f" | "F" | "f*" | "n") {
             return Err(invalid("mixed stroked/filled table geometry unsupported"));
         }
@@ -185,6 +185,8 @@ fn closed_bands(lines: &[Line], page: u32, options: &Options) -> Result<Vec<PdfT
                 x_boundaries: xs,
                 y_boundaries: ys,
                 cell_spans: Vec::new(),
+                rotation: 0,
+                text_assignment: Default::default(),
             });
         }
         Ok(())

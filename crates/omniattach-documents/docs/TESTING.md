@@ -17,7 +17,7 @@ Opt-in `#[ignore]` suites read local data from environment variables:
 |---|---|---|
 | `pdf::handoff_pdfs_match_poppler_words_and_source_lines` | `OMNIATTACH_PDF_LINES_DIR` | Local PDFs compared with `pdftotext` |
 | `lfe_equation_corpus` | `OMNIATTACH_EQUATION_CORPUS` | Corpus from `scripts/equations/fixtures.py` |
-| `pdf_tables::samples` | `OMNIATTACH_FILLED_TABLE_SAMPLE`, `OMNIATTACH_OPEN_ROWS_SAMPLE` | Private real table PDFs |
+| `pdf_tables::samples` | `OMNIATTACH_FILLED_TABLE_SAMPLE`, `OMNIATTACH_OPEN_ROWS_SAMPLE`, `OMNIATTACH_TABLE_SAMPLES` (folder) | Private real table PDFs (ruled, booktabs, rotated, shaded, scanned) |
 
 Run them with `-- --ignored`. See [PDF-ELEMENTS.md](PDF-ELEMENTS.md) for the PDF
 element tools. Synthetic fixtures are regression checks, not a measure of

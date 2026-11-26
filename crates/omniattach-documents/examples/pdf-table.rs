@@ -21,6 +21,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         x_boundaries: axis(&args[2])?,
         y_boundaries: axis(&args[3])?,
         cell_spans: Vec::new(),
+        rotation: 0,
+        text_assignment: Default::default(),
     };
     let options = Options::default();
     let result = convert_inspection(&inspect_pdf(&args[0], &options)?, &grid, &options)?;

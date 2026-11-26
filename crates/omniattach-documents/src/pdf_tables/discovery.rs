@@ -1,17 +1,20 @@
 //! Page-local table discovery and candidate conversion.
 //!
-//! Detectors, selected by the page's painting style:
+//! Strict detectors, selected by the page's painting style, run first:
 //! - [`PdfTableDetector::StrokedGrid`]: one stroked path of full-span rulings.
 //! - [`PdfTableDetector::FilledGrid`]: thin filled rectangles forming closed bands.
 //! - [`PdfTableDetector::OpenRows`]: filled rules without outer borders, with row spans.
 //!
-//! All detectors reject XObjects (`Do`) and non-default page Rotate/UserUnit.
+//! They reject XObjects (`Do`), clips they cannot prove harmless, mixed
+//! painting and non-default page Rotate/UserUnit. When they decline or find
+//! nothing, [`PdfTableDetector::Layout`] infers tables from any visible rules
+//! plus text alignment, in upright and rotated reading frames.
 use super::paths::number;
 use super::{
-    DISCOVERY_SCHEMA, PdfTableConversion, PdfTableGrid, PdfTableSpan, convert_inspection, filled,
-    invalid, limit, stroked,
+    DISCOVERY_SCHEMA, MAX_CANDIDATES, PdfTableConversion, PdfTableGrid, PdfTableSpan,
+    PdfTextAssignment, convert_inspection, filled, frame, invalid, layout, limit, rules, stroked,
 };
-use crate::{Error, Options, Result};
+use crate::{Error, Options, PdfElementKind, PdfInspection, Result};
 use lopdf::content::Content;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -24,10 +27,14 @@ pub enum PdfTableDetector {
     StrokedGrid,
     FilledGrid,
     OpenRows,
+    /// Rules plus text alignment; boundaries are inferred.
+    Layout,
+    /// [`Self::Layout`] on OCR words and raster rulings of a scanned page.
+    OcrLayout,
 }
 
 impl PdfTableDetector {
-    fn note(self) -> &'static str {
+    pub(super) fn note(self) -> &'static str {
         match self {
             Self::StrokedGrid => "Detected from one stroked grid path",
             Self::FilledGrid => {
@@ -36,6 +43,21 @@ impl PdfTableDetector {
             Self::OpenRows => {
                 "Open-sided table: outer edges inferred from horizontal rules; merged cells are row spans only"
             }
+            Self::Layout => {
+                "Layout table: bounded by horizontal rules; columns from vertical rules or text alignment, \
+                 rows from rules and text lines; merged cells are not detected"
+            }
+            Self::OcrLayout => {
+                "OCR layout table: words and rulings recognized from a page image; text may contain OCR errors"
+            }
+        }
+    }
+
+    /// Inferred grids place text by centre; drawn grids require containment.
+    pub fn text_assignment(self) -> PdfTextAssignment {
+        match self {
+            Self::Layout | Self::OcrLayout => PdfTextAssignment::Centre,
+            _ => PdfTextAssignment::Contained,
         }
     }
 }
@@ -51,6 +73,9 @@ pub struct PdfTableCandidate {
     pub y_boundaries: Vec<f64>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub cell_spans: Vec<PdfTableSpan>,
+    /// Reading frame of the boundaries; see [`PdfTableGrid::rotation`].
+    #[serde(default, skip_serializing_if = "super::is_zero")]
+    pub rotation: u16,
 }
 
 impl PdfTableCandidate {
@@ -60,6 +85,8 @@ impl PdfTableCandidate {
             x_boundaries: self.x_boundaries.clone(),
             y_boundaries: self.y_boundaries.clone(),
             cell_spans: self.cell_spans.clone(),
+            rotation: self.rotation,
+            text_assignment: self.detector.text_assignment(),
         }
     }
 }
@@ -81,43 +108,93 @@ pub fn discover_pdf_tables_bytes(
     page: u32,
     options: &Options,
 ) -> Result<PdfTableDiscovery> {
+    discover(name, bytes, page, options, None)
+}
+
+fn discover(
+    name: &str,
+    bytes: &[u8],
+    page: u32,
+    options: &Options,
+    report: Option<&PdfInspection>,
+) -> Result<PdfTableDiscovery> {
     if bytes.len() > options.limits.input_bytes {
         return Err(limit("input bytes"));
     }
-    let content = page_content(bytes, page, options)?;
-    let (grids, detector) = if filled::applies(&content) {
-        let (grids, open) = filled::discover(&content, page, options)?;
-        let detector = if open {
-            PdfTableDetector::OpenRows
-        } else {
-            PdfTableDetector::FilledGrid
-        };
-        (grids, detector)
+    let PageContent {
+        content,
+        default_page,
+        media_box,
+    } = page_content(bytes, page, options)?;
+    let strict = if default_page {
+        strict(&content, page, options)
     } else {
-        (
-            stroked::discover(&content, page, options)?,
-            PdfTableDetector::StrokedGrid,
-        )
+        Err(invalid("non-default page rotation or UserUnit unsupported"))
     };
-    let candidates = grids
+    let mut warnings = Vec::new();
+    let candidates = match strict {
+        Ok((grids, detector)) if !grids.is_empty() => {
+            warnings.push(
+                "Vector rulings in page content only; no XObjects, scanned tables or cross-page joins"
+                    .to_string(),
+            );
+            warnings.push(detector.note().into());
+            grids
+                .into_iter()
+                .map(|g| (detector, 0, g.x_boundaries, g.y_boundaries, g.cell_spans))
+                .collect::<Vec<_>>()
+        }
+        Err(Error::LimitExceeded(m)) => return Err(Error::LimitExceeded(m)),
+        declined => {
+            if let Err(e) = declined {
+                warnings.push(format!("Strict ruled-grid detectors declined: {e}"));
+            }
+            let owned;
+            let report = match report {
+                Some(r) => r,
+                None => {
+                    owned = crate::inspect_pdf_bytes(name, bytes, options)?;
+                    &owned
+                }
+            };
+            let found = layout_tables(&content, media_box, report, page, options)?;
+            warnings.push(
+                "Layout detection: rules from any painting style plus text alignment; images and \
+                 Form XObjects are ignored and cross-page joins are not made"
+                    .into(),
+            );
+            if found.is_empty() && !has_text(report, page) {
+                warnings.push(
+                    "Page has no native text; scanned tables need the OCR path (pdf_tables::ocr)"
+                        .into(),
+                );
+            } else if !found.is_empty() {
+                warnings.push(PdfTableDetector::Layout.note().into());
+            }
+            found
+                .into_iter()
+                .map(|(rotation, t)| (PdfTableDetector::Layout, rotation, t.xs, t.ys, Vec::new()))
+                .collect()
+        }
+    };
+    if candidates.len() > MAX_CANDIDATES {
+        return Err(limit("table candidates"));
+    }
+    let candidates = candidates
         .into_iter()
         .enumerate()
-        .map(|(index, g)| PdfTableCandidate {
-            candidate: index + 1,
-            detector,
-            page,
-            x_boundaries: g.x_boundaries,
-            y_boundaries: g.y_boundaries,
-            cell_spans: g.cell_spans,
-        })
+        .map(
+            |(index, (detector, rotation, xs, ys, spans))| PdfTableCandidate {
+                candidate: index + 1,
+                detector,
+                page,
+                x_boundaries: xs,
+                y_boundaries: ys,
+                cell_spans: spans,
+                rotation,
+            },
+        )
         .collect::<Vec<_>>();
-    let mut warnings = vec![
-        "Vector rulings in page content only; no XObjects, scanned tables or cross-page joins"
-            .to_string(),
-    ];
-    if !candidates.is_empty() {
-        warnings.push(detector.note().into());
-    }
     Ok(PdfTableDiscovery {
         schema_version: DISCOVERY_SCHEMA.into(),
         source: name.into(),
@@ -126,6 +203,68 @@ pub fn discover_pdf_tables_bytes(
         candidates,
         warnings,
     })
+}
+
+fn strict(
+    content: &Content,
+    page: u32,
+    options: &Options,
+) -> Result<(Vec<PdfTableGrid>, PdfTableDetector)> {
+    if filled::applies(content) {
+        let (grids, open) = filled::discover(content, page, options)?;
+        let detector = if open {
+            PdfTableDetector::OpenRows
+        } else {
+            PdfTableDetector::FilledGrid
+        };
+        Ok((grids, detector))
+    } else {
+        Ok((
+            stroked::discover(content, page, options)?,
+            PdfTableDetector::StrokedGrid,
+        ))
+    }
+}
+
+fn has_text(report: &PdfInspection, page: u32) -> bool {
+    report.elements.iter().any(|e| {
+        e.anchor.page == page
+            && e.kind == PdfElementKind::Text
+            && e.text.as_deref().is_some_and(|t| !t.trim().is_empty())
+    })
+}
+
+/// Layout tables in every reading frame worth trying, top-down per frame.
+fn layout_tables(
+    content: &Content,
+    media_box: Option<[f64; 4]>,
+    report: &PdfInspection,
+    page: u32,
+    options: &Options,
+) -> Result<Vec<(u16, layout::Table)>> {
+    let page_rules = rules::collect(content, options, media_box)?;
+    let mut out = Vec::new();
+    for rotation in frame::frames(&report.elements, page) {
+        let boxes: Vec<layout::Box4> = report
+            .elements
+            .iter()
+            .filter(|e| {
+                e.anchor.page == page
+                    && e.kind == PdfElementKind::Text
+                    && e.text.as_deref().is_some_and(|t| !t.trim().is_empty())
+                    && frame::of_angle(e.text_rotation) == Some(rotation)
+            })
+            .filter_map(|e| e.bounds)
+            .map(|b| frame::to_frame([b.left, b.bottom, b.right, b.top], rotation))
+            .collect();
+        let frame_rules: Vec<_> = page_rules.iter().map(|r| r.rotated(rotation)).collect();
+        for t in layout::tables(&frame_rules, &boxes, layout::NATIVE) {
+            if (t.xs.len() - 1) * (t.ys.len() - 1) <= options.limits.cells.min(super::MAX_CELLS) {
+                out.push((rotation, t));
+            }
+        }
+    }
+    Ok(out)
 }
 
 /// Path variant; reads the input once within the configured size limit.
@@ -155,12 +294,15 @@ pub fn convert_pdf_table_bytes(
     let index = candidate
         .checked_sub(1)
         .ok_or_else(|| invalid("candidate numbers are one-based"))?;
-    let discovery = discover_pdf_tables_bytes(name, bytes, page, options)?;
+    if bytes.len() > options.limits.input_bytes {
+        return Err(limit("input bytes"));
+    }
+    let report = crate::inspect_pdf_bytes(name, bytes, options)?;
+    let discovery = discover(name, bytes, page, options, Some(&report))?;
     let selected = discovery
         .candidates
         .get(index)
         .ok_or_else(|| invalid("candidate not found"))?;
-    let report = crate::inspect_pdf_bytes(name, bytes, options)?;
     let mut result = convert_inspection(&report, &selected.grid(), options)?;
     result.warnings.push(selected.detector.note().into());
     Ok(result)
@@ -197,8 +339,15 @@ fn read(path: &Path, options: &Options) -> Result<Vec<u8>> {
     Ok(bytes)
 }
 
-/// Decoded content of one page, after checking page Rotate/UserUnit.
-fn page_content(bytes: &[u8], page: u32, options: &Options) -> Result<Content> {
+/// Decoded content of one page.
+struct PageContent {
+    content: Content,
+    /// Rotate and UserUnit are defaults.
+    default_page: bool,
+    media_box: Option<[f64; 4]>,
+}
+
+fn page_content(bytes: &[u8], page: u32, options: &Options) -> Result<PageContent> {
     let parse = |e: lopdf::Error| Error::Parse(e.to_string());
     let max_bytes = options.limits.archive_bytes.min(usize::MAX as u64) as usize;
     let pdf = lopdf::Document::load_mem_with_options(
@@ -221,12 +370,26 @@ fn page_content(bytes: &[u8], page: u32, options: &Options) -> Result<Content> {
         .ok_or_else(|| invalid("page not found; pages are one-based"))?;
     // Rotate and UserUnit are inheritable; walk the page tree upwards.
     let mut dictionary = pdf.get_dictionary(id).map_err(parse)?;
+    let mut default_page = true;
+    let mut media_box = None;
     for depth in 0..32 {
+        if media_box.is_none()
+            && let Ok(lopdf::Object::Array(a)) = dictionary.get(b"MediaBox")
+            && a.len() == 4
+            && let Ok(v) = a.iter().map(number).collect::<Result<Vec<f64>>>()
+        {
+            media_box = Some([
+                v[0].min(v[2]),
+                v[1].min(v[3]),
+                v[0].max(v[2]),
+                v[1].max(v[3]),
+            ]);
+        }
         for (key, expected) in [(b"Rotate".as_slice(), 0.0), (b"UserUnit".as_slice(), 1.0)] {
             if let Ok(v) = dictionary.get(key)
                 && number(v)? != expected
             {
-                return Err(invalid("non-default page rotation or UserUnit unsupported"));
+                default_page = false;
             }
         }
         let Ok(parent) = dictionary.get(b"Parent") else {
@@ -242,7 +405,11 @@ fn page_content(bytes: &[u8], page: u32, options: &Options) -> Result<Content> {
     let data = pdf
         .get_page_content_with_limit(id, max_bytes)
         .map_err(parse)?;
-    Content::decode(&data).map_err(parse)
+    Ok(PageContent {
+        content: Content::decode(&data).map_err(parse)?,
+        default_page,
+        media_box,
+    })
 }
 
 #[cfg(test)]

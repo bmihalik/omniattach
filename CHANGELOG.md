@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### PDF tables: layout, rotated and scanned tables
+
+- New `layout` detector, used when the strict ruled-grid detectors decline a page or find nothing: rules from any painting style (stroked, thin fills, shaded cell/row edges, multi-cell fill paths), clips and images tolerated, columns from vertical rules or shared whitespace, rows from rules and text lines, captions dropped, tables cut by the page edge closed where their column rules end. Pages that used to fail with "clipped", "XObjects" or "mixed stroked/filled" now return candidates (or none) instead of an error. Strict-detector results are unchanged on the 618-page comparison corpus.
+- Rotated tables: inspection gives rotated text runs correct bounds and an optional `text_rotation`; discovery also tries 90/270-degree frames. Candidates and grids gain `rotation`; grids gain `text_assignment` (`contained` default, `centre` for inferred grids).
+- Scanned tables: `pdf_tables::ocr` (`GrayRaster`, `OcrWord`, `PdfTableOcrPage`, `discover_ocr_tables`, `convert_ocr_table`) runs the layout detector on raster rulings and OCR words; detector `ocr_layout`. Backends gain `PdfPageOcr::{render_page_gray, recognize_image_words}`. CLI `--ocr`, `--ocr-language`, `--ocr-dpi` (feature `table-ocr`, default on).
+- Tested on twelve new real PDFs (booktabs, rotated, clipped, mixed, shaded and scanned tables) through ignored, environment-driven regression tests.
+
 ### PDF elements cleanup
 
 - Tables: one shared path scanner for all detectors and one text-to-cell converter for plain and merged-cell grids (previously duplicated). Discovered grids, Markdown and source sequences are unchanged on a 950-page old-vs-new comparison.
